@@ -1,0 +1,565 @@
+const { app, BrowserWindow, ipcMain, dialog } = require('electron');
+const path = require('path');
+const fs = require('fs');
+const axios = require('axios');
+const Store = require('electron-store');
+
+// Initialize settings store
+const store = new Store();
+
+let mainWindow;
+let model = null;
+let llamaInterface = null;
+const MODEL_URL = 'https://creativetechnologies.s3.eu-west-2.amazonaws.com/LLM/google/gguf/gemma-3-1b-it-Q2_K.gguf';
+const MODEL_FILENAME = 'gemma-3-1b-it-Q2_K.gguf';
+
+function createWindow() {
+  mainWindow = new BrowserWindow({
+    width: 1200,
+    height: 800,
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+      preload: path.join(__dirname, 'preload.js')
+    }
+  });
+
+  mainWindow.loadFile('index.html');
+
+  // Open DevTools if in dev mode
+  if (process.argv.includes('--dev')) {
+    mainWindow.webContents.openDevTools();
+  }
+}
+
+// Get the models directory path
+function getModelsPath() {
+  let modelsPath;
+  // Always use the local models directory for consistency
+  modelsPath = path.join(__dirname, 'models');
+
+  // Create directory if it doesn't exist
+  if (!fs.existsSync(modelsPath)) {
+    fs.mkdirSync(modelsPath, { recursive: true });
+  }
+
+  return modelsPath;
+}
+
+// Check if model exists
+function modelExists() {
+  const modelPath = path.join(getModelsPath(), MODEL_FILENAME);
+  return fs.existsSync(modelPath);
+}
+
+// Check if a custom model is saved in settings
+function hasCustomModel() {
+  return store.has('customModelPath') && fs.existsSync(store.get('customModelPath'));
+}
+
+// Get the custom model path from settings
+function getCustomModelPath() {
+  return store.get('customModelPath');
+}
+
+// Save custom model path to settings
+function saveCustomModelPath(modelPath) {
+  store.set('customModelPath', modelPath);
+}
+
+// Download model from S3
+async function downloadModel() {
+  const modelsPath = getModelsPath();
+  const modelPath = path.join(modelsPath, MODEL_FILENAME);
+  
+  // If model already exists, don't download again
+  if (modelExists()) {
+    mainWindow.webContents.send('model-status', { status: 'exists', message: 'Model already downloaded' });
+    return modelPath;
+  }
+
+  mainWindow.webContents.send('model-status', { status: 'downloading', message: 'Downloading model...' });
+  
+  try {
+    const writer = fs.createWriteStream(modelPath);
+    const response = await axios({
+      url: MODEL_URL,
+      method: 'GET',
+      responseType: 'stream',
+      onDownloadProgress: (progressEvent) => {
+        const percentCompleted = Math.round((progressEvent.loaded * 100) / progressEvent.total);
+        mainWindow.webContents.send('download-progress', percentCompleted);
+      }
+    });
+
+    response.data.pipe(writer);
+
+    return new Promise((resolve, reject) => {
+      writer.on('finish', () => {
+        mainWindow.webContents.send('model-status', { status: 'ready', message: 'Model downloaded successfully' });
+        resolve(modelPath);
+      });
+      writer.on('error', (err) => {
+        mainWindow.webContents.send('model-status', { status: 'error', message: `Error downloading model: ${err.message}` });
+        reject(err);
+      });
+    });
+  } catch (error) {
+    mainWindow.webContents.send('model-status', { status: 'error', message: `Error downloading model: ${error.message}` });
+    throw error;
+  }
+}
+
+// Check if a file is a valid GGUF model
+async function isValidGGUFModel(filePath) {
+  try {
+    // Check file extension
+    if (!filePath.toLowerCase().endsWith('.gguf')) {
+      return {
+        valid: false,
+        reason: 'File does not have a .gguf extension'
+      };
+    }
+    
+    // Read the first 128 bytes of the file to check for GGUF magic header
+    const fd = fs.openSync(filePath, 'r');
+    const buffer = Buffer.alloc(128);
+    fs.readSync(fd, buffer, 0, 128, 0);
+    fs.closeSync(fd);
+    
+    // GGUF magic is "GGUF" in ASCII (0x47475546)
+    if (buffer.toString('ascii', 0, 4) !== 'GGUF') {
+      return {
+        valid: false,
+        reason: 'Not a valid GGUF format file (missing GGUF header)'
+      };
+    }
+    
+    // Check quantization format (rough heuristic based on filename)
+    const filename = path.basename(filePath).toLowerCase();
+    const preferredFormats = ['q4_0', 'q4_1', 'q5_0', 'q5_k_m', 'q6_k', 'q8_0'];
+    const hasPreferredFormat = preferredFormats.some(format => filename.includes(format));
+    
+    if (!hasPreferredFormat) {
+      return {
+        valid: true,
+        warning: 'This model quantization may not be fully compatible. Models with Q4_0, Q5_K_M or Q8_0 quantization are recommended.'
+      };
+    }
+    
+    return {
+      valid: true
+    };
+  } catch (error) {
+    console.error('Error checking GGUF file:', error);
+    return {
+      valid: false,
+      reason: `Error checking file: ${error.message}`
+    };
+  }
+}
+
+// Select a local GGUF model file
+async function selectLocalModel() {
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: 'Select GGUF Model File',
+    properties: ['openFile'],
+    filters: [
+      { name: 'GGUF Models', extensions: ['gguf'] }
+    ]
+  });
+
+  if (result.canceled || result.filePaths.length === 0) {
+    return null;
+  }
+
+  const modelPath = result.filePaths[0];
+  
+  // Check if the selected model is valid
+  const validationResult = await isValidGGUFModel(modelPath);
+  
+  if (!validationResult.valid) {
+    mainWindow.webContents.send('model-status', { 
+      status: 'error', 
+      message: `Invalid model: ${validationResult.reason}` 
+    });
+    return null;
+  }
+  
+  if (validationResult.warning) {
+    mainWindow.webContents.send('model-status', { 
+      status: 'warning', 
+      message: validationResult.warning 
+    });
+  }
+  
+  // Save the valid model path
+  saveCustomModelPath(modelPath);
+  
+  mainWindow.webContents.send('model-status', { 
+    status: 'exists', 
+    message: `Custom model selected: ${path.basename(modelPath)}` 
+  });
+  
+  return modelPath;
+}
+
+// Initialize the model
+async function initializeModel(customModelPath = null) {
+  try {
+    if (model) {
+      // If we already have a model loaded but want to switch to a different one
+      if (customModelPath) {
+        // Unload current model
+        model = null;
+      } else {
+        // Keep using current model
+        return;
+      }
+    }
+    
+    let modelPath;
+    
+    if (customModelPath) {
+      modelPath = customModelPath;
+    } else if (hasCustomModel()) {
+      modelPath = getCustomModelPath();
+    } else {
+      modelPath = await ensureModelExists();
+    }
+    
+    mainWindow.webContents.send('model-status', { 
+      status: 'loading', 
+      message: `Loading model: ${path.basename(modelPath)}...` 
+    });
+    
+    console.log(`Loading model from path: ${modelPath}`);
+    
+    // Use dynamic import for the node-llama-cpp module
+    console.log("Importing node-llama-cpp module...");
+    // Use the special workaround for CommonJS to load ES modules
+    const nodeIlama = await Function('return import("node-llama-cpp")')();
+    const { getLlama } = nodeIlama;
+    console.log("Import successful, node-llama-cpp module loaded");
+    
+    console.log("Getting llama interface with debug enabled");
+    // Get the llama interface - using the correct API according to documentation
+    const llama = await getLlama({
+      debug: true, // Enable debugging to see what's happening
+      logLevel: 'debug' // Set log level to debug for more detailed logs
+    });
+    console.log("Llama interface loaded successfully");
+    
+    console.log("Attempting to load model with the following configuration:");
+    const modelConfig = {
+      modelPath: modelPath,
+      contextSize: 2048,
+      batchSize: 512,
+      gpuLayers: 0, // Set to higher number to use GPU
+      seed: 42,
+      f16Kv: true, // Enable f16 KV cache
+      logitsAll: false,
+      vocabOnly: false,
+      useMlock: false,
+      embedding: false,
+      useMmap: true
+    };
+    console.log(JSON.stringify(modelConfig, null, 2));
+    
+    // Load the model using the new API
+    console.log("Loading model now...");
+    try {
+      model = await llama.loadModel(modelConfig);
+      console.log("Model loaded successfully");
+    } catch (loadError) {
+      console.error("Error during model loading:", loadError);
+      console.error("Error details:", JSON.stringify(loadError, null, 2));
+      throw loadError;
+    }
+    
+    // Log available model methods for debugging
+    try {
+      const modelMethods = Object.getOwnPropertyNames(Object.getPrototypeOf(model));
+      console.log("Available model methods:", modelMethods);
+    } catch (methodError) {
+      console.log("Could not retrieve model methods:", methodError.message);
+    }
+    
+    mainWindow.webContents.send('model-status', { 
+      status: 'ready', 
+      message: `Model loaded and ready: ${path.basename(modelPath)}` 
+    });
+  } catch (error) {
+    console.error('Error initializing model:', error);
+    console.error('Error stack:', error.stack);
+    
+    // Check for specific error types
+    if (error.message && error.message.includes('number of elements') && error.message.includes('block size')) {
+      mainWindow.webContents.send('model-status', { 
+        status: 'error', 
+        message: `Error loading model: This GGUF model appears to have incompatible quantization. Try using a different quantization format (like Q4_0 or Q5_K_M).` 
+      });
+    } else if (error.message && error.message.includes('is not a function')) {
+      mainWindow.webContents.send('model-status', { 
+        status: 'error', 
+        message: `API compatibility error: The node-llama-cpp version may not be compatible with this application. Try reinstalling node-llama-cpp with 'npm uninstall node-llama-cpp && npm install node-llama-cpp'.` 
+      });
+    } else if (error.message && error.message.includes('model is corrupted or incomplete')) {
+      mainWindow.webContents.send('model-status', { 
+        status: 'error', 
+        message: `Error loading model: The model file appears to be corrupted or incomplete. Try downloading the model again or using a different model.` 
+      });
+    } else if (error.code === 'ERR_PACKAGE_PATH_NOT_EXPORTED') {
+      mainWindow.webContents.send('model-status', { 
+        status: 'error', 
+        message: `Module compatibility error: There's an issue with the node-llama-cpp module structure. Try reinstalling with 'npm uninstall node-llama-cpp && npm install node-llama-cpp'.` 
+      });
+    } else if (error.name === 'InsufficientMemoryError') {
+      mainWindow.webContents.send('model-status', { 
+        status: 'error', 
+        message: `Insufficient memory: Not enough memory to load the model. Try using a smaller model or reducing context size.` 
+      });
+    } else {
+      mainWindow.webContents.send('model-status', { 
+        status: 'error', 
+        message: `Error initializing model: ${error.message}` 
+      });
+    }
+  }
+}
+
+// Ensure model exists, download if needed
+async function ensureModelExists() {
+  if (modelExists()) {
+    return path.join(getModelsPath(), MODEL_FILENAME);
+  } else {
+    return await downloadModel();
+  }
+}
+
+// Process chat message
+async function processChatMessage(message, history) {
+  if (!model) {
+    console.log("No model loaded, initializing model first");
+    await initializeModel();
+  }
+  
+  try {
+    // Get the model path to determine the model type
+    let modelPath = "";
+    if (hasCustomModel()) {
+      modelPath = getCustomModelPath();
+    } else if (modelExists()) {
+      modelPath = path.join(getModelsPath(), MODEL_FILENAME);
+    }
+    
+    const modelName = path.basename(modelPath).toLowerCase();
+    
+    // Format prompt based on model type
+    let prompt = "";
+    
+    // Check if it's a Llama model by name
+    const isLlama = modelName.includes('llama');
+    
+    if (isLlama) {
+      // Llama-2 Chat format
+      const systemPrompt = "You are a helpful, respectful and honest assistant. Always answer as helpfully as possible, while being safe. Please ensure that your responses are socially unbiased and positive in nature. If a question is not clear, or is not factually coherent, explain why instead of answering something not correct.";
+      
+      prompt = `<s>[INST] <<SYS>>\n${systemPrompt}\n<</SYS>>\n\n`;
+      
+      // Add conversation history for context
+      if (history.length > 0) {
+        for (const entry of history) {
+          prompt += `${entry.user} [/INST] ${entry.assistant} </s><s>[INST] `;
+        }
+      }
+      
+      // Add current message
+      prompt += `${message} [/INST] `;
+    } else {
+      // Generic format for other models
+      if (history.length > 0) {
+        for (const entry of history) {
+          prompt += `User: ${entry.user}\nAssistant: ${entry.assistant}\n`;
+        }
+      }
+      
+      prompt += `User: ${message}\nAssistant:`;
+    }
+    
+    console.log("Generating response with prompt format for model:", isLlama ? "Llama" : "Generic");
+    console.log("Prompt:", prompt.substring(0, 200) + "... (truncated)");
+    
+    // Using the raw sequence-based approach from the documentation
+    try {
+      console.log("Creating context");
+      const context = await model.createContext();
+      console.log("Context created successfully");
+      
+      console.log("Getting sequence");
+      const sequence = context.getSequence();
+      console.log("Sequence obtained");
+      
+      console.log("Tokenizing prompt");
+      const tokens = model.tokenize(prompt);
+      console.log(`Tokenized prompt into ${tokens.length} tokens`);
+      
+      // Array to collect generated tokens
+      const responseTokens = [];
+      console.log("Starting token generation");
+      
+      // Define a stopCondition function
+      const stopCondition = (text) => {
+        if (isLlama && (text.includes("</s>") || text.includes("[INST]"))) {
+          return true;
+        }
+        
+        // For non-Llama models, stop on "User:" as it may indicate the start of a new query
+        if (!isLlama && text.includes("\nUser:")) {
+          return true;
+        }
+        
+        // Common stop condition
+        if (responseTokens.length > 800) {
+          return true;
+        }
+        
+        return false;
+      };
+      
+      try {
+        // Use the evaluate generator to process tokens one by one
+        for await (const generatedToken of sequence.evaluate(tokens)) {
+          responseTokens.push(generatedToken);
+          
+          // Send the current token to the frontend
+          const currentText = model.detokenize(responseTokens);
+          mainWindow.webContents.send('streaming-token', {
+            token: currentText,
+            isComplete: false
+          });
+          
+          // Check if we should stop generation
+          if (stopCondition(currentText)) {
+            console.log("Stop condition met, halting generation");
+            break;
+          }
+        }
+        
+        // Send final complete response
+        let responseText = model.detokenize(responseTokens);
+        console.log("Response generation completed");
+        
+        // Clean up the response based on model type
+        if (isLlama) {
+          // For Llama, remove any trailing "</s>" or "[INST]"
+          responseText = responseText.split("</s>")[0].split("[INST]")[0].trim();
+        } else {
+          // For other models, clean up any trailing "User:" or "Assistant:"
+          responseText = responseText.split("\nUser:")[0].split("\nAssistant:")[0].trim();
+        }
+        
+        // Send the final complete response
+        mainWindow.webContents.send('streaming-token', {
+          token: responseText,
+          isComplete: true
+        });
+        
+        return responseText;
+      } catch (evaluateError) {
+        console.error("Error during sequence evaluation:", evaluateError);
+        throw evaluateError;
+      }
+    } catch (error) {
+      console.error("Sequence-based generation failed:", error.message);
+      
+      // Try direct generation as a fallback
+      try {
+        console.log("Trying built-in completion API as fallback");
+        const result = await model.completion({
+          prompt: prompt,
+          temperature: 0.7,
+          top_p: 0.95,
+          max_tokens: 800,
+          stop: isLlama ? ["</s>", "[INST]"] : ["User:"]
+        });
+        
+        console.log("Completion API succeeded");
+        return result.trim();
+      } catch (completionError) {
+        console.error("Completion API failed:", completionError.message);
+        return `I'm sorry, but I'm having trouble generating a response. The model might need to be reinitialized or may not be fully compatible. You could try selecting a different model or restarting the application.`;
+      }
+    }
+  } catch (error) {
+    console.error('Error in processChatMessage:', error);
+    console.error('Error stack:', error.stack);
+    return `Sorry, I encountered an error: ${error.message}`;
+  }
+}
+
+// App ready event
+app.whenReady().then(() => {
+  createWindow();
+  
+  // Check for model on startup
+  if (hasCustomModel() || modelExists()) {
+    // Initialize model in background if it already exists
+    initializeModel();
+  }
+  
+  app.on('activate', function () {
+    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+  });
+});
+
+// Quit when all windows are closed, except on macOS
+app.on('window-all-closed', function () {
+  if (process.platform !== 'darwin') app.quit();
+});
+
+// IPC handlers
+ipcMain.handle('check-model', async () => {
+  return hasCustomModel() || modelExists();
+});
+
+ipcMain.handle('download-model', async () => {
+  try {
+    await downloadModel();
+    return { success: true };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('select-local-model', async () => {
+  try {
+    const modelPath = await selectLocalModel();
+    if (modelPath) {
+      await initializeModel(modelPath);
+      return { success: true, path: modelPath };
+    } else {
+      return { success: false, error: 'Model selection canceled' };
+    }
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('init-model', async () => {
+  try {
+    await initializeModel();
+    return { success: true };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('chat-message', async (event, { message, history }) => {
+  try {
+    const response = await processChatMessage(message, history);
+    return { success: true, response };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+}); 
