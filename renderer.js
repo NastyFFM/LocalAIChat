@@ -187,7 +187,17 @@ async function selectLocalModel() {
     
     if (result.success) {
       downloadStatus.textContent = `Model selected: ${result.path}`;
-      addModelSelectionGuide();
+      // Initialize the model after selection
+      updateStatus('loading', 'Initializing selected model...');
+      const initResult = await window.electronAPI.initModel();
+      
+      if (initResult.success) {
+        updateStatus('ready', 'Model initialized successfully');
+        showChatInterface();
+      } else {
+        updateStatus('error', `Failed to initialize model: ${initResult.error}`);
+        addModelSelectionGuide();
+      }
     } else {
       if (result.error !== 'Model selection canceled') {
         downloadStatus.textContent = `Model selection failed: ${result.error}`;

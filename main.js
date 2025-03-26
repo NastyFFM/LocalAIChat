@@ -206,126 +206,137 @@ async function selectLocalModel() {
 
 // Initialize the model
 async function initializeModel(customModelPath = null) {
-  try {
-    if (model) {
-      // If we already have a model loaded but want to switch to a different one
-      if (customModelPath) {
-        // Unload current model
-        model = null;
-      } else {
-        // Keep using current model
-        return;
-      }
-    }
-    
-    let modelPath;
-    
-    if (customModelPath) {
-      modelPath = customModelPath;
-    } else if (hasCustomModel()) {
-      modelPath = getCustomModelPath();
-    } else {
-      modelPath = await ensureModelExists();
-    }
-    
-    mainWindow.webContents.send('model-status', { 
-      status: 'loading', 
-      message: `Loading model: ${path.basename(modelPath)}...` 
-    });
-    
-    console.log(`Loading model from path: ${modelPath}`);
-    
-    // Use dynamic import for the node-llama-cpp module
-    console.log("Importing node-llama-cpp module...");
-    // Use the special workaround for CommonJS to load ES modules
-    const nodeIlama = await Function('return import("node-llama-cpp")')();
-    const { getLlama } = nodeIlama;
-    console.log("Import successful, node-llama-cpp module loaded");
-    
-    console.log("Getting llama interface with debug enabled");
-    // Get the llama interface - using the correct API according to documentation
-    const llama = await getLlama({
-      debug: true, // Enable debugging to see what's happening
-      logLevel: 'debug' // Set log level to debug for more detailed logs
-    });
-    console.log("Llama interface loaded successfully");
-    
-    console.log("Attempting to load model with the following configuration:");
-    const modelConfig = {
-      modelPath: modelPath,
-      contextSize: 2048,
-      batchSize: 512,
-      gpuLayers: 0, // Set to higher number to use GPU
-      seed: 42,
-      f16Kv: true, // Enable f16 KV cache
-      logitsAll: false,
-      vocabOnly: false,
-      useMlock: false,
-      embedding: false,
-      useMmap: true
-    };
-    console.log(JSON.stringify(modelConfig, null, 2));
-    
-    // Load the model using the new API
-    console.log("Loading model now...");
     try {
-      model = await llama.loadModel(modelConfig);
-      console.log("Model loaded successfully");
-    } catch (loadError) {
-      console.error("Error during model loading:", loadError);
-      console.error("Error details:", JSON.stringify(loadError, null, 2));
-      throw loadError;
+        if (model) {
+            // If we already have a model loaded but want to switch to a different one
+            if (customModelPath) {
+                // Unload current model
+                model = null;
+            } else {
+                // Keep using current model
+                return;
+            }
+        }
+        
+        let modelPath;
+        
+        if (customModelPath) {
+            modelPath = customModelPath;
+        } else if (hasCustomModel()) {
+            modelPath = getCustomModelPath();
+        } else {
+            modelPath = await ensureModelExists();
+        }
+        
+        mainWindow.webContents.send('model-status', { 
+            status: 'loading', 
+            message: `Loading model: ${path.basename(modelPath)}...` 
+        });
+        
+        console.log(`Loading model from path: ${modelPath}`);
+        
+        // Use dynamic import for the node-llama-cpp module
+        console.log("Importing node-llama-cpp module...");
+        const nodeIlama = await Function('return import("node-llama-cpp")')();
+        const { getLlama } = nodeIlama;
+        console.log("Import successful, node-llama-cpp module loaded");
+        
+        console.log("Getting llama interface with debug enabled");
+        const llama = await getLlama({
+            debug: true,
+            logLevel: 'debug'
+        });
+        console.log("Llama interface loaded successfully");
+        
+        console.log("Attempting to load model with the following configuration:");
+        const modelConfig = {
+            modelPath: modelPath,
+            contextSize: 2048,
+            batchSize: 512,
+            gpuLayers: 0,
+            seed: 42,
+            f16Kv: true,
+            logitsAll: false,
+            vocabOnly: false,
+            useMlock: false,
+            embedding: false,
+            useMmap: true,
+            // Specific settings for Gemma models
+            ropeScaling: {
+                type: 'linear',
+                factor: 2.0
+            },
+            ropeBase: 10000,
+            ropeFreqBase: 10000,
+            ropeFreqScale: 1.0
+        };
+        console.log(JSON.stringify(modelConfig, null, 2));
+        
+        // Load the model using the new API
+        console.log("Loading model now...");
+        try {
+            model = await llama.loadModel(modelConfig);
+            console.log("Model loaded successfully");
+            
+            // Model loaded successfully, send ready status
+            mainWindow.webContents.send('model-status', { 
+                status: 'ready', 
+                message: `Model loaded and ready: ${path.basename(modelPath)}` 
+            });
+        } catch (loadError) {
+            console.error("Error during model loading:", loadError);
+            console.error("Error details:", JSON.stringify(loadError, null, 2));
+            
+            // Check for specific Gemma-related errors
+            if (loadError.message && loadError.message.includes('rope')) {
+                console.log("Attempting to load model without RoPE scaling...");
+                delete modelConfig.ropeScaling;
+                delete modelConfig.ropeBase;
+                delete modelConfig.ropeFreqBase;
+                delete modelConfig.ropeFreqScale;
+                model = await llama.loadModel(modelConfig);
+                console.log("Model loaded successfully without RoPE scaling");
+            } else {
+                throw loadError;
+            }
+        }
+    } catch (error) {
+        console.error('Error initializing model:', error);
+        console.error('Error stack:', error.stack);
+        
+        // Check for specific error types
+        if (error.message && error.message.includes('number of elements') && error.message.includes('block size')) {
+            mainWindow.webContents.send('model-status', { 
+                status: 'error', 
+                message: `Error loading model: This GGUF model appears to have incompatible quantization. Try using a different quantization format (like Q4_0 or Q5_K_M).` 
+            });
+        } else if (error.message && error.message.includes('is not a function')) {
+            mainWindow.webContents.send('model-status', { 
+                status: 'error', 
+                message: `API compatibility error: The node-llama-cpp version may not be compatible with this application. Try reinstalling node-llama-cpp with 'npm uninstall node-llama-cpp && npm install node-llama-cpp'.` 
+            });
+        } else if (error.message && error.message.includes('model is corrupted or incomplete')) {
+            mainWindow.webContents.send('model-status', { 
+                status: 'error', 
+                message: `Error loading model: The model file appears to be corrupted or incomplete. Try downloading the model again or using a different model.` 
+            });
+        } else if (error.code === 'ERR_PACKAGE_PATH_NOT_EXPORTED') {
+            mainWindow.webContents.send('model-status', { 
+                status: 'error', 
+                message: `Module compatibility error: There's an issue with the node-llama-cpp module structure. Try reinstalling with 'npm uninstall node-llama-cpp && npm install node-llama-cpp'.` 
+            });
+        } else if (error.name === 'InsufficientMemoryError') {
+            mainWindow.webContents.send('model-status', { 
+                status: 'error', 
+                message: `Insufficient memory: Not enough memory to load the model. Try using a smaller model or reducing context size.` 
+            });
+        } else {
+            mainWindow.webContents.send('model-status', { 
+                status: 'error', 
+                message: `Error initializing model: ${error.message}` 
+            });
+        }
     }
-    
-    // Log available model methods for debugging
-    try {
-      const modelMethods = Object.getOwnPropertyNames(Object.getPrototypeOf(model));
-      console.log("Available model methods:", modelMethods);
-    } catch (methodError) {
-      console.log("Could not retrieve model methods:", methodError.message);
-    }
-    
-    mainWindow.webContents.send('model-status', { 
-      status: 'ready', 
-      message: `Model loaded and ready: ${path.basename(modelPath)}` 
-    });
-  } catch (error) {
-    console.error('Error initializing model:', error);
-    console.error('Error stack:', error.stack);
-    
-    // Check for specific error types
-    if (error.message && error.message.includes('number of elements') && error.message.includes('block size')) {
-      mainWindow.webContents.send('model-status', { 
-        status: 'error', 
-        message: `Error loading model: This GGUF model appears to have incompatible quantization. Try using a different quantization format (like Q4_0 or Q5_K_M).` 
-      });
-    } else if (error.message && error.message.includes('is not a function')) {
-      mainWindow.webContents.send('model-status', { 
-        status: 'error', 
-        message: `API compatibility error: The node-llama-cpp version may not be compatible with this application. Try reinstalling node-llama-cpp with 'npm uninstall node-llama-cpp && npm install node-llama-cpp'.` 
-      });
-    } else if (error.message && error.message.includes('model is corrupted or incomplete')) {
-      mainWindow.webContents.send('model-status', { 
-        status: 'error', 
-        message: `Error loading model: The model file appears to be corrupted or incomplete. Try downloading the model again or using a different model.` 
-      });
-    } else if (error.code === 'ERR_PACKAGE_PATH_NOT_EXPORTED') {
-      mainWindow.webContents.send('model-status', { 
-        status: 'error', 
-        message: `Module compatibility error: There's an issue with the node-llama-cpp module structure. Try reinstalling with 'npm uninstall node-llama-cpp && npm install node-llama-cpp'.` 
-      });
-    } else if (error.name === 'InsufficientMemoryError') {
-      mainWindow.webContents.send('model-status', { 
-        status: 'error', 
-        message: `Insufficient memory: Not enough memory to load the model. Try using a smaller model or reducing context size.` 
-      });
-    } else {
-      mainWindow.webContents.send('model-status', { 
-        status: 'error', 
-        message: `Error initializing model: ${error.message}` 
-      });
-    }
-  }
 }
 
 // Ensure model exists, download if needed
