@@ -7,6 +7,7 @@ yarn-error.log
 # Build output
 dist/
 build/
+out/
 
 # Environment variables
 .env
@@ -25,4 +26,25 @@ Thumbs.db
 
 # Model files
 models/
-*.gguf 
+*.gguf
+*.bin
+*.pth
+*.pt
+*.onnx
+*.h5
+*.hdf5
+*.pkl
+*.model
+*.weights
+*.weights.*
+*.safetensors
+*.pt.*
+*.pth.*
+*.bin.*
+*.onnx.*
+*.h5.*
+*.hdf5.*
+*.pkl.*
+*.model.*
+*.weights.*
+*.safetensors.* 
