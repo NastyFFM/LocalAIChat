@@ -10,8 +10,8 @@ const store = new Store();
 let mainWindow;
 let model = null;
 let llamaInterface = null;
-const MODEL_URL = 'https://creativetechnologies.s3.eu-west-2.amazonaws.com/LLM/google/gguf/gemma-3-1b-it-Q2_K.gguf';
-const MODEL_FILENAME = 'gemma-3-1b-it-Q2_K.gguf';
+const MODEL_URL = 'https://creativetechnologies.s3.eu-west-2.amazonaws.com/LLM/Meta/llama-2-7b-chat.Q2_K.gguf';
+const MODEL_FILENAME = 'llama-2-7b-chat.Q2_K.gguf';
 
 function createWindow() {
   mainWindow = new BrowserWindow({
