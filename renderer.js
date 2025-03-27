@@ -12,6 +12,7 @@ const chatInterface = document.getElementById('chat-interface');
 const chatContainer = document.getElementById('chat-container');
 const messageInput = document.getElementById('message-input');
 const sendButton = document.getElementById('send-button');
+const testButton = document.getElementById('testButton');
 
 // Chat history
 let chatHistory = [];
@@ -266,6 +267,47 @@ function changeModel() {
   showDownloadSection();
 }
 
+// Test prompt function
+async function sendTestPrompt() {
+    try {
+        // Disable the test button while processing
+        testButton.disabled = true;
+        
+        // Clear the message input
+        messageInput.value = '';
+        
+        // Add user message to chat
+        addMessageToChat('test', 'user');
+        
+        // Create assistant message container
+        const assistantMessageDiv = document.createElement('div');
+        assistantMessageDiv.className = 'message assistant';
+        const messageContent = document.createElement('div');
+        messageContent.className = 'message-content';
+        assistantMessageDiv.appendChild(messageContent);
+        chatContainer.appendChild(assistantMessageDiv);
+        
+        // Set up response chunk listener
+        window.electronAPI.onStreamingToken(({ token, isComplete }) => {
+            messageContent.textContent = token;
+            if (isComplete) {
+                testButton.disabled = false;
+            }
+        });
+        
+        // Send the test prompt to main process
+        const result = await window.electronAPI.sendMessage('test', []);
+        
+        if (!result.success) {
+            throw new Error(result.error);
+        }
+    } catch (error) {
+        console.error('Error sending test prompt:', error);
+        alert('Error sending test prompt: ' + error.message);
+        testButton.disabled = false;
+    }
+}
+
 // Event Listeners
 downloadButton.addEventListener('click', downloadModel);
 localModelButton.addEventListener('click', selectLocalModel);
@@ -299,6 +341,9 @@ const unlistenDownloadProgress = window.electronAPI.onDownloadProgress((progress
   progressBar.style.width = `${progress}%`;
   downloadStatus.textContent = `Downloading... ${progress}%`;
 });
+
+// Add event listener for test button
+testButton.addEventListener('click', sendTestPrompt);
 
 // Initialize
 checkModelStatus(); 

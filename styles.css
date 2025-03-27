@@ -1,0 +1,19 @@
+.test-button {
+    background-color: #4CAF50;
+    color: white;
+    border: none;
+    padding: 8px 16px;
+    border-radius: 4px;
+    cursor: pointer;
+    margin-left: 8px;
+    transition: background-color 0.3s;
+}
+
+.test-button:hover {
+    background-color: #45a049;
+}
+
+.test-button:disabled {
+    background-color: #cccccc;
+    cursor: not-allowed;
+} 
