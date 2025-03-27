@@ -385,17 +385,11 @@ async function processChatMessage(message, history) {
         messages.push(
           {
             role: "user",
-            content: [{
-              type: "text",
-              text: entry.user
-            }]
+            content: entry.user
           },
           {
-            role: "assistant",
-            content: [{
-              type: "text",
-              text: entry.assistant
-            }]
+            role: "model",
+            content: entry.assistant
           }
         );
       }
@@ -404,10 +398,7 @@ async function processChatMessage(message, history) {
     // Add current message
     messages.push({
       role: "user",
-      content: [{
-        type: "text",
-        text: message
-      }]
+      content: message
     });
 
     console.log("Generating response with Gemma 3 chat template format");
@@ -435,12 +426,12 @@ async function processChatMessage(message, history) {
         const isLast = i === messages.length - 1;
         
         if (msg.role === "user") {
-          prompt += `<start_of_turn>user\n${msg.content[0].text}<end_of_turn>\n`;
+          prompt += `<start_of_turn>user\n${msg.content}<end_of_turn>\n`;
           if (isLast) {
             prompt += `<start_of_turn>model\n`;
           }
-        } else if (msg.role === "assistant") {
-          prompt += `<start_of_turn>model\n${msg.content[0].text}`;
+        } else if (msg.role === "model") {
+          prompt += `<start_of_turn>model\n${msg.content}`;
           if (!isLast) {
             prompt += `<end_of_turn>\n`;
           }
@@ -510,6 +501,8 @@ async function processChatMessage(message, history) {
           .replace(/<start_of_turn>model\n/, '')
           .replace(/<start_of_turn>user\n/, '')
           .replace(/<bos>.*?<start_of_turn>/, '') // Remove bos token and its content
+          .replace(/^<start_of_turn>model\n/, '') // Remove model turn start at the beginning
+          .replace(/<start_of_turn>model$/, '') // Remove model turn start at the end
           .trim();
         
         // Send the final response
