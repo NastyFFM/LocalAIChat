@@ -14,8 +14,9 @@ const MODEL_URL = 'https://creativetechnologies.s3.eu-west-2.amazonaws.com/LLM/M
 const MODEL_FILENAME = 'llama-2-7b-chat.Q2_K.gguf';
 
 function createWindow() {
+  console.log("Creating main window");
   mainWindow = new BrowserWindow({
-    width: 1200,
+    width: 1000,
     height: 800,
     webPreferences: {
       nodeIntegration: false,
@@ -25,11 +26,21 @@ function createWindow() {
   });
 
   mainWindow.loadFile('index.html');
+  
+  // Set up IPC handlers
+  setupIPCHandlers();
 
-  // Open DevTools if in dev mode
+  // Open the DevTools in development mode
   if (process.argv.includes('--dev')) {
     mainWindow.webContents.openDevTools();
+    console.log("DevTools opened in development mode");
   }
+
+  mainWindow.on('closed', () => {
+    mainWindow = null;
+  });
+  
+  console.log("Main window created");
 }
 
 // Get the models directory path
@@ -204,17 +215,36 @@ async function selectLocalModel() {
   return modelPath;
 }
 
+// Explicitly send model status update
+function updateModelStatus(status, message) {
+  console.log(`Updating model status: ${status} - ${message}`);
+  if (mainWindow) {
+    mainWindow.webContents.send('model-status', { 
+      status: status, 
+      message: message 
+    });
+  } else {
+    console.error("Cannot update model status: mainWindow is not defined");
+  }
+}
+
 // Initialize the model
 async function initializeModel(customModelPath = null) {
+    console.log("==================== MODEL INITIALIZATION STARTED ====================");
     try {
         if (model) {
+            console.log("Model already loaded, checking if we need to reload");
             // If we already have a model loaded but want to switch to a different one
             if (customModelPath) {
+                console.log("Switching to new model path, unloading current model");
                 // Unload current model
                 model = null;
             } else {
                 // Keep using current model
-                return;
+                console.log("Using already loaded model");
+                // Send ready status to ensure UI is updated
+                updateModelStatus('ready', `Model already loaded and ready`);
+                return { success: true };
             }
         }
         
@@ -222,27 +252,32 @@ async function initializeModel(customModelPath = null) {
         
         if (customModelPath) {
             modelPath = customModelPath;
+            console.log(`Using custom model path: ${modelPath}`);
         } else if (hasCustomModel()) {
             modelPath = getCustomModelPath();
+            console.log(`Using saved custom model path: ${modelPath}`);
         } else {
             modelPath = await ensureModelExists();
+            console.log(`Using default model path: ${modelPath}`);
         }
 
         // Verify model file exists and is readable
         if (!fs.existsSync(modelPath)) {
+            console.error(`Model file not found at path: ${modelPath}`);
+            updateModelStatus('error', `Model file not found at path: ${modelPath}`);
             throw new Error(`Model file not found at path: ${modelPath}`);
         }
 
         try {
             fs.accessSync(modelPath, fs.constants.R_OK);
+            console.log("Model file is readable");
         } catch (err) {
+            console.error(`Cannot read model file: ${err}`);
+            updateModelStatus('error', `Cannot read model file at path: ${modelPath}`);
             throw new Error(`Cannot read model file at path: ${modelPath}`);
         }
         
-        mainWindow.webContents.send('model-status', { 
-            status: 'loading', 
-            message: `Loading model: ${path.basename(modelPath)}...` 
-        });
+        updateModelStatus('loading', `Loading model: ${path.basename(modelPath)}...`);
         
         console.log(`Loading model from path: ${modelPath}`);
         console.log(`File size: ${fs.statSync(modelPath).size} bytes`);
@@ -283,10 +318,14 @@ async function initializeModel(customModelPath = null) {
             console.log("Model loaded successfully");
             
             // Model loaded successfully, send ready status
-            mainWindow.webContents.send('model-status', { 
-                status: 'ready', 
-                message: `Model loaded and ready: ${path.basename(modelPath)}` 
-            });
+            updateModelStatus('ready', `Model loaded and ready: ${path.basename(modelPath)}`);
+            
+            console.log("==================== MODEL INITIALIZATION COMPLETED SUCCESSFULLY ====================");
+            
+            // Force a short delay to ensure the status update is received
+            await new Promise(resolve => setTimeout(resolve, 100));
+            
+            return { success: true };
         } catch (loadError) {
             console.error("Error during model loading:", loadError);
             console.error("Error details:", JSON.stringify(loadError, null, 2));
@@ -304,9 +343,21 @@ async function initializeModel(customModelPath = null) {
             try {
                 model = await llama.loadModel(basicConfig);
                 console.log("Model loaded successfully with basic configuration");
+                
+                // Model loaded successfully with basic configuration, send ready status
+                updateModelStatus('ready', `Model loaded and ready: ${path.basename(modelPath)}`);
+                
+                console.log("==================== MODEL INITIALIZATION COMPLETED SUCCESSFULLY (BASIC CONFIG) ====================");
+                
+                // Force a short delay to ensure the status update is received
+                await new Promise(resolve => setTimeout(resolve, 100));
+                
+                return { success: true };
             } catch (basicLoadError) {
                 console.error("Error loading with basic configuration:", basicLoadError);
-                throw new Error(`Failed to load model: ${basicLoadError.message}`);
+                updateModelStatus('error', `Failed to load model: ${basicLoadError.message}`);
+                console.log("==================== MODEL INITIALIZATION FAILED ====================");
+                return { success: false, error: basicLoadError.message };
             }
         }
     } catch (error) {
@@ -315,37 +366,20 @@ async function initializeModel(customModelPath = null) {
         
         // Check for specific error types
         if (error.message && error.message.includes('number of elements') && error.message.includes('block size')) {
-            mainWindow.webContents.send('model-status', { 
-                status: 'error', 
-                message: `Error loading model: This GGUF model appears to have incompatible quantization. Try using a different quantization format (like Q4_0 or Q5_K_M).` 
-            });
+            updateModelStatus('error', `Error loading model: This GGUF model appears to have incompatible quantization. Try using a different quantization format (like Q4_0 or Q5_K_M).`);
         } else if (error.message && error.message.includes('is not a function')) {
-            mainWindow.webContents.send('model-status', { 
-                status: 'error', 
-                message: `API compatibility error: The node-llama-cpp version may not be compatible with this application. Try reinstalling node-llama-cpp with 'npm uninstall node-llama-cpp && npm install node-llama-cpp'.` 
-            });
+            updateModelStatus('error', `API compatibility error: The node-llama-cpp version may not be compatible with this application. Try reinstalling node-llama-cpp with 'npm uninstall node-llama-cpp && npm install node-llama-cpp'.`);
         } else if (error.message && error.message.includes('model is corrupted or incomplete')) {
-            mainWindow.webContents.send('model-status', { 
-                status: 'error', 
-                message: `Error loading model: The model file appears to be corrupted or incomplete. Try downloading the model again or using a different model.` 
-            });
+            updateModelStatus('error', `Error loading model: The model file appears to be corrupted or incomplete. Try downloading the model again or using a different model.`);
         } else if (error.code === 'ERR_PACKAGE_PATH_NOT_EXPORTED') {
-            mainWindow.webContents.send('model-status', { 
-                status: 'error', 
-                message: `Module compatibility error: There's an issue with the node-llama-cpp module structure. Try reinstalling with 'npm uninstall node-llama-cpp && npm install node-llama-cpp'.` 
-            });
+            updateModelStatus('error', `Module compatibility error: There's an issue with the node-llama-cpp module structure. Try reinstalling with 'npm uninstall node-llama-cpp && npm install node-llama-cpp'.`);
         } else if (error.name === 'InsufficientMemoryError') {
-            mainWindow.webContents.send('model-status', { 
-                status: 'error', 
-                message: `Insufficient memory: Not enough memory to load the model. Try using a smaller model or reducing context size.` 
-            });
+            updateModelStatus('error', `Insufficient memory: Not enough memory to load the model. Try using a smaller model or reducing context size.`);
         } else {
-            mainWindow.webContents.send('model-status', { 
-                status: 'error', 
-                message: `Error initializing model: ${error.message}` 
-            });
+            updateModelStatus('error', `Error initializing model: ${error.message}`);
         }
-        throw error;
+        console.log("==================== MODEL INITIALIZATION FAILED ====================");
+        return { success: false, error: error.message };
     }
 }
 
@@ -430,26 +464,46 @@ async function processChatMessage(message, history) {
       prompt += `<bos>Du bist ein hilfreiches KI-Modell. Antworte höflich und informativ auf die Fragen des Nutzers.`;
       
       // Process each message according to the template
+      console.log("Processing messages to build prompt");
       for (let i = 0; i < messages.length; i++) {
         const msg = messages[i];
-        const isLast = i === messages.length - 1;
+        console.log(`Processing message ${i+1}/${messages.length}, role: ${msg.role}`);
+        
+        // Extract the text content from the content array
+        let textContent = "";
+        if (msg.content && Array.isArray(msg.content)) {
+          // Extract text from content array
+          textContent = msg.content
+            .filter(item => item.type === "text")
+            .map(item => item.text)
+            .join(" ");
+        } else if (typeof msg.content === "string") {
+          // For backward compatibility if content is a string
+          textContent = msg.content;
+        } else {
+          console.warn(`Unexpected content format in message ${i}:`, msg.content);
+          textContent = JSON.stringify(msg.content);
+        }
         
         if (msg.role === "user") {
-          prompt += `<start_of_turn>user\n${msg.content[0].text}<end_of_turn>\n`;
-          if (isLast) {
-            prompt += `<start_of_turn>model\n`;
-          }
-        } else if (msg.role === "assistant") {
-          prompt += `<start_of_turn>model\n${msg.content[0].text}`;
-          if (!isLast) {
+          prompt += `<start_of_turn>user\n${textContent}<end_of_turn>\n`;
+          console.log(`Added user message: "${textContent.substring(0, 30)}${textContent.length > 30 ? '...' : ''}"`);
+        } else if (msg.role === "model" || msg.role === "assistant") {
+          prompt += `<start_of_turn>model\n${textContent}`;
+          console.log(`Added ${msg.role} message: "${textContent.substring(0, 30)}${textContent.length > 30 ? '...' : ''}"`);
+          if (i < messages.length - 1) {
             prompt += `<end_of_turn>\n`;
+            console.log("Added end_of_turn token");
+          } else {
+            console.log("No end_of_turn token added (last message)");
           }
         }
       }
       
-      // If this is a test message, add the second part of the test prompt
+      // If this is a test message, add the second part of the test prompt exactly as specified
       if (message === "test" && messages.length === 1) {
-        prompt += `Hallo! Wie kann ich dir helfen?<end_of_turn>\n<start_of_turn>user\nwie gehts dir<end_of_turn>\n<start_of_turn>model\n`;
+        console.log("Adding test prompt special case");
+        prompt += `Hallo! Wie kann ich dir helfen?<end_of_turn>\n<start_of_turn>user\nwie gehts dir<end_of_turn>\n`;
       }
       
       // Log the complete prompt
@@ -561,48 +615,75 @@ app.on('window-all-closed', function () {
   if (process.platform !== 'darwin') app.quit();
 });
 
-// IPC handlers
-ipcMain.handle('check-model', async () => {
-  return hasCustomModel() || modelExists();
-});
-
-ipcMain.handle('download-model', async () => {
-  try {
-    await downloadModel();
-    return { success: true };
-  } catch (error) {
-    return { success: false, error: error.message };
-  }
-});
-
-ipcMain.handle('select-local-model', async () => {
-  try {
-    const modelPath = await selectLocalModel();
-    if (modelPath) {
-      await initializeModel(modelPath);
-      return { success: true, path: modelPath };
-    } else {
-      return { success: false, error: 'Model selection canceled' };
+// Define IPC handlers
+function setupIPCHandlers() {
+  console.log("Setting up IPC handlers");
+  
+  // Handle sending messages to the model
+  ipcMain.handle('chat-message', async (event, params) => {
+    console.log("IPC: chat-message received", params);
+    try {
+      const { message, history } = params;
+      console.log(`Processing message: "${message}" with history length: ${history.length}`);
+      const result = await processChatMessage(message, history);
+      console.log("IPC: chat-message processed");
+      return result;
+    } catch (error) {
+      console.error("IPC: chat-message error:", error);
+      return { success: false, error: error.message };
     }
-  } catch (error) {
-    return { success: false, error: error.message };
-  }
-});
-
-ipcMain.handle('init-model', async () => {
-  try {
-    await initializeModel();
-    return { success: true };
-  } catch (error) {
-    return { success: false, error: error.message };
-  }
-});
-
-ipcMain.handle('chat-message', async (event, { message, history }) => {
-  try {
-    const response = await processChatMessage(message, history);
-    return { success: true, response };
-  } catch (error) {
-    return { success: false, error: error.message };
-  }
-}); 
+  });
+  
+  // Handle model checking
+  ipcMain.handle('check-model', async () => {
+    console.log("IPC: check-model received");
+    return hasCustomModel() || modelExists();
+  });
+  
+  // Handle model initialization
+  ipcMain.handle('init-model', async () => {
+    console.log("IPC: init-model received");
+    try {
+      const result = await initializeModel();
+      console.log("IPC: init-model completed");
+      return result;
+    } catch (error) {
+      console.error("IPC: init-model error:", error);
+      return { success: false, error: error.message };
+    }
+  });
+  
+  // Handle model download
+  ipcMain.handle('download-model', async () => {
+    console.log("IPC: download-model received");
+    try {
+      await downloadModel();
+      console.log("IPC: download-model completed");
+      return { success: true };
+    } catch (error) {
+      console.error("IPC: download-model error:", error);
+      return { success: false, error: error.message };
+    }
+  });
+  
+  // Handle local model selection
+  ipcMain.handle('select-local-model', async () => {
+    console.log("IPC: select-local-model received");
+    try {
+      const modelPath = await selectLocalModel();
+      if (modelPath) {
+        await initializeModel(modelPath);
+        console.log("IPC: select-local-model completed");
+        return { success: true, path: modelPath };
+      } else {
+        console.log("IPC: select-local-model canceled");
+        return { success: false, error: 'Model selection canceled' };
+      }
+    } catch (error) {
+      console.error("IPC: select-local-model error:", error);
+      return { success: false, error: error.message };
+    }
+  });
+  
+  console.log("IPC handlers setup complete");
+} 
