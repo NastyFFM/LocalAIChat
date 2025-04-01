@@ -10,6 +10,8 @@ const store = new Store();
 let mainWindow;
 let model = null;
 let llamaInterface = null;
+let isGenerating = false; // Add this flag to track generation state
+let shouldStopGeneration = false; // Add this flag for stopping generation
 const MODEL_URL = 'https://creativetechnologies.s3.eu-west-2.amazonaws.com/LLM/Meta/llama-2-7b-chat.Q2_K.gguf';
 const MODEL_FILENAME = 'llama-2-7b-chat.Q2_K.gguf';
 
@@ -30,6 +32,14 @@ function createWindow() {
   if (process.argv.includes('--dev')) {
     mainWindow.webContents.openDevTools();
   }
+  
+  // Add a new handler for stopping response generation
+  ipcMain.on('stop-response', () => {
+    if (isGenerating) {
+      shouldStopGeneration = true;
+      console.log('Response generation stopping requested by user');
+    }
+  });
 }
 
 // Get the models directory path
@@ -377,38 +387,34 @@ async function processChatMessage(message, history) {
     const modelName = path.basename(modelPath).toLowerCase();
     
     // Format messages using the exact required structure for Gemma 3
-    const messages = [];
+    // Note: history now comes in the correct format directly from the frontend
+    const messages = Array.isArray(history) ? [...history] : [];
 
-    // Add conversation history
-    if (history.length > 0) {
-      for (const entry of history) {
-        messages.push(
-          {
-            role: "user",
-            content: [{
-              type: "text",
-              text: entry.user
-            }]
-          },
-          {
-            role: "assistant",
-            content: [{
-              type: "text",
-              text: entry.assistant
-            }]
-          }
-        );
+    // If no history provided, set up empty array
+    if (!Array.isArray(history) || history.length === 0) {
+      // Add current message if not already part of history
+      messages.push({
+        role: "user",
+        content: [{
+          type: "text",
+          text: message
+        }]
+      });
+    } else {
+      // Check if the current message is already the last entry in history
+      // This handles cases where the frontend has already added the message to history
+      const lastMessage = history[history.length - 1];
+      if (lastMessage.role !== "user" || lastMessage.content[0].text !== message) {
+        // Add current message if it's not the last message in history
+        messages.push({
+          role: "user",
+          content: [{
+            type: "text",
+            text: message
+          }]
+        });
       }
     }
-
-    // Add current message
-    messages.push({
-      role: "user",
-      content: [{
-        type: "text",
-        text: message
-      }]
-    });
 
     console.log("Generating response with Gemma 3 chat template format");
     console.log("Messages:", JSON.stringify(messages, null, 2));
@@ -426,8 +432,15 @@ async function processChatMessage(message, history) {
       // Format the prompt using Gemma 3's chat template format
       let prompt = "";
       
-      // Add system instruction in bos token
-      prompt += `<bos>Du bist ein hilfreiches KI-Modell. Antworte höflich und informativ auf die Fragen des Nutzers.`;
+      // Add basic BOS token
+      prompt += `<bos>`;
+      
+      // Add a pre-defined conversation starter to help the model understand its role
+      prompt += `<start_of_turn>user
+Wer bist du?<end_of_turn>
+<start_of_turn>model
+Ich bin ein hilfreicher KI-Assistent, gebildet, höflich und immer bereit dich zu unterstützen. Was kann ich für dich tun?<end_of_turn>
+`;
       
       // Process each message according to the template
       for (let i = 0; i < messages.length; i++) {
@@ -435,21 +448,42 @@ async function processChatMessage(message, history) {
         const isLast = i === messages.length - 1;
         
         if (msg.role === "user") {
-          prompt += `<start_of_turn>user\n${msg.content[0].text}<end_of_turn>\n`;
-          if (isLast) {
-            prompt += `<start_of_turn>model\n`;
+          prompt += `<start_of_turn>user\n${msg.content[0].text}<end_of_turn>`;
+          if (!isLast && messages[i+1].role === "user") {
+            // Add a newline between consecutive user messages
+            prompt += '\n';
           }
         } else if (msg.role === "assistant") {
           prompt += `<start_of_turn>model\n${msg.content[0].text}`;
+          // Always add end_of_turn for assistant messages in chat history
+          prompt += `<end_of_turn>`;
           if (!isLast) {
-            prompt += `<end_of_turn>\n`;
+            prompt += '\n';
           }
         }
       }
       
+      // If no additional messages were added, remove trailing newline
+      if (messages.length === 1 && messages[0].role === "user") {
+        // Remove trailing newline after <end_of_turn>
+        prompt = prompt.trim();
+      }
+      
       // If this is a test message, add the second part of the test prompt
       if (message === "test" && messages.length === 1) {
-        prompt += `Hallo! Wie kann ich dir helfen?<end_of_turn>\n<start_of_turn>user\nwie gehts dir<end_of_turn>\n<start_of_turn>model\n`;
+        // Replace the entire prompt with a pre-defined test conversation
+        prompt = `<bos><start_of_turn>user
+Hallo!<end_of_turn>
+<start_of_turn>model
+Hallo! Wie kann ich dir helfen?<end_of_turn>
+<start_of_turn>user
+wie gehts dir<end_of_turn>`;
+      }
+      
+      // Make sure there's no <start_of_turn>model at the end
+      if (prompt.endsWith('<start_of_turn>model') || prompt.match(/<start_of_turn>model\s*$/)) {
+        console.log("Detected <start_of_turn>model at the end of prompt, removing it");
+        prompt = prompt.replace(/<start_of_turn>model\s*$/, '');
       }
       
       // Log the complete prompt
@@ -458,9 +492,15 @@ async function processChatMessage(message, history) {
       console.log("\nComplete formatted prompt:");
       console.log(prompt);
       
+      // Tokenize the prompt
       console.log("Tokenizing prompt");
       const tokens = model.tokenize(prompt);
       console.log(`Tokenized prompt into ${tokens.length} tokens`);
+      
+      // Add additional detailed logging of the final prompt
+      console.log("=== FINAL PROMPT BEFORE SUBMISSION TO MODEL ===");
+      console.log(prompt);
+      console.log("=== END OF FINAL PROMPT ===");
       
       // Array to collect generated tokens
       const responseTokens = [];
@@ -506,10 +546,14 @@ async function processChatMessage(message, history) {
         
         // Clean up the response
         responseText = responseText
-          .replace(/<end_of_turn>/, '')
-          .replace(/<start_of_turn>model\n/, '')
-          .replace(/<start_of_turn>user\n/, '')
-          .replace(/<bos>.*?<start_of_turn>/, '') // Remove bos token and its content
+          .replace(/<end_of_turn>/g, '')
+          .replace(/<start_of_turn>model\n/g, '')
+          .replace(/<start_of_turn>model /g, '')
+          .replace(/<start_of_turn>model/g, '')
+          .replace(/<start_of_turn>user\n/g, '')
+          .replace(/<start_of_turn>user /g, '')
+          .replace(/<start_of_turn>user/g, '')
+          .replace(/<bos>.*?<start_of_turn>/gs, '') // Remove bos token and its content
           .trim();
         
         // Send the final response
@@ -605,4 +649,48 @@ ipcMain.handle('chat-message', async (event, { message, history }) => {
   } catch (error) {
     return { success: false, error: error.message };
   }
-}); 
+});
+
+// Modify your existing message handler in main.js
+ipcMain.on('send-message', async (event, message) => {
+  if (!llamaInterface) {
+    mainWindow.webContents.send('receive-message', 'Error: Model not loaded.');
+    return;
+  }
+  
+  try {
+    isGenerating = true;
+    shouldStopGeneration = false;
+    
+    // Start the AI response generation
+    const response = await llamaInterface.prompt(message);
+    
+    // If your response is streaming (returns an iterator or can be processed in chunks)
+    let responseText = '';
+    
+    // This part will depend on how exactly your llamaInterface works
+    // Example for streaming response:
+    for await (const chunk of response) {
+      if (shouldStopGeneration) {
+        // Send notification that generation was stopped
+        mainWindow.webContents.send('response-stopped');
+        break;
+      }
+      
+      responseText += chunk;
+      // Send partial responses to show progress
+      mainWindow.webContents.send('response-chunk', chunk);
+    }
+    
+    // If we didn't stop, send the complete response
+    if (!shouldStopGeneration) {
+      mainWindow.webContents.send('response-complete', responseText);
+    }
+  } catch (error) {
+    console.error('Error generating response:', error);
+    mainWindow.webContents.send('receive-message', 'Error: Failed to generate response.');
+  } finally {
+    isGenerating = false;
+    shouldStopGeneration = false;
+  }
+});

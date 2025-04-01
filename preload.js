@@ -32,4 +32,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.removeAllListeners('streaming-token');
     };
   }
-}); 
+});
+
+contextBridge.exposeInMainWorld('api', {
+  sendMessage: (message) => ipcRenderer.send('send-message', message),
+  receiveMessage: (callback) => ipcRenderer.on('receive-message', (event, message) => callback(message)),
+  stopResponse: () => ipcRenderer.send('stop-response'),
+  onResponseChunk: (callback) => ipcRenderer.on('response-chunk', (event, chunk) => callback(chunk)),
+  onResponseStopped: (callback) => ipcRenderer.on('response-stopped', () => callback()),
+  onResponseComplete: (callback) => ipcRenderer.on('response-complete', (event, text) => callback(text))
+});

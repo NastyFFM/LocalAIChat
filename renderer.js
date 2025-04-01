@@ -17,6 +17,17 @@ const testButton = document.getElementById('testButton');
 // Chat history
 let chatHistory = [];
 
+// Add an entry to chat history
+function addToChatHistory(role, message) {
+  chatHistory.push({
+    role: role,
+    content: [{
+      type: "text",
+      text: message
+    }]
+  });
+}
+
 // Check model status on startup
 async function checkModelStatus() {
   try {
@@ -77,78 +88,129 @@ function showChatInterface() {
 }
 
 // Handle message sending
-async function sendMessage() {
+function sendMessage() {
   const message = messageInput.value.trim();
-  if (!message) return;
   
-  // Disable input while processing
-  messageInput.disabled = true;
-  sendButton.disabled = true;
-  
-  // Add user message to chat
-  addMessageToChat(message, 'user');
-  
-  // Clear input
-  messageInput.value = '';
-  
-  try {
-    // Create a placeholder for the assistant's response
-    const assistantMessageId = addMessageToChat('', 'assistant');
-    let lastToken = '';
-    
-    // Set up streaming listener
-    const removeStreamingListener = window.electronAPI.onStreamingToken((data) => {
-      const assistantMessage = document.getElementById(assistantMessageId);
-      if (assistantMessage) {
-        // Extract only the new part of the token
-        const newContent = data.token.slice(lastToken.length);
-        assistantMessage.querySelector('.message-content').textContent = data.token;
-        lastToken = data.token;
-      }
+  if (message) {
+    try {
+      // Display user message in the chat
+      addMessageToChat('user', message);
+      messageInput.value = '';
       
-      // If the response is complete, update chat history
-      if (data.isComplete) {
-        removeStreamingListener();
-        chatHistory.push({ user: message, assistant: data.token });
-        messageInput.disabled = false;
-        sendButton.disabled = false;
-        messageInput.focus();
-      }
-    });
-    
-    // Send message to main process
-    await window.electronAPI.sendMessage(message, chatHistory);
-    
-  } catch (error) {
-    console.error('Error sending message:', error);
-    updateStatus('error', 'Error sending message');
-    messageInput.disabled = false;
-    sendButton.disabled = false;
-    messageInput.focus();
+      // Add user message to history
+      addToChatHistory('user', message);
+      
+      // Disable the send button during AI response
+      sendButton.disabled = true;
+      
+      // Create a new unique container for this response
+      const responseId = 'response-' + Date.now();
+      const assistantMessageDiv = document.createElement('div');
+      assistantMessageDiv.className = 'message assistant-message';
+      assistantMessageDiv.id = responseId;
+      const messageContent = document.createElement('div');
+      messageContent.className = 'message-content';
+      messageContent.textContent = '...'; // Initial content
+      assistantMessageDiv.appendChild(messageContent);
+      chatContainer.appendChild(assistantMessageDiv);
+      chatContainer.scrollTop = chatContainer.scrollHeight;
+      
+      // Will hold the aggregated message text
+      let messageText = '';
+      
+      // Clear any previous token listeners
+      const previousListener = window.electronAPI.onStreamingToken(() => {});
+      if (previousListener) previousListener();
+      
+      // Create a custom streaming handler for this specific message
+      const streamingHandler = ({ token, isComplete }) => {
+        // Save this token as the latest response
+        messageText = token;
+        
+        // Update only this message element
+        const thisElement = document.getElementById(responseId);
+        if (thisElement) {
+          const thisContent = thisElement.querySelector('.message-content');
+          if (thisContent) {
+            thisContent.textContent = messageText;
+          }
+        }
+        
+        // If complete, re-enable send button and add to history
+        if (isComplete) {
+          sendButton.disabled = false;
+          
+          // Add assistant response to history
+          addToChatHistory('assistant', messageText);
+        }
+        
+        // Always scroll to the latest message
+        chatContainer.scrollTop = chatContainer.scrollHeight;
+      };
+      
+      // Register listener for this message
+      const removeListener = window.electronAPI.onStreamingToken(streamingHandler);
+      
+      // Send the message to main process along with the entire chat history
+      window.electronAPI.sendMessage(message, chatHistory)
+        .then(result => {
+          if (!result.success) {
+            console.error('Error sending message:', result.error);
+            messageContent.textContent = 'Error: ' + result.error;
+            sendButton.disabled = false;
+            
+            // Remove listener
+            if (removeListener) removeListener();
+          }
+        })
+        .catch(error => {
+          console.error('Exception sending message:', error);
+          messageContent.textContent = 'Error: Failed to send message';
+          sendButton.disabled = false;
+          
+          // Remove listener
+          if (removeListener) removeListener();
+        });
+    } catch (error) {
+      console.error('Error in sendMessage:', error);
+      sendButton.disabled = false;
+    }
   }
 }
 
-// Add message to chat
-function addMessageToChat(message, sender) {
-  const messageDiv = document.createElement('div');
-  messageDiv.className = `message ${sender}-message`;
-  
-  const messageContent = document.createElement('div');
-  messageContent.className = 'message-content';
-  messageContent.textContent = message;
-  
-  messageDiv.appendChild(messageContent);
-  chatContainer.appendChild(messageDiv);
-  
-  // Generate a unique ID for the message
-  const messageId = `message-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-  messageDiv.id = messageId;
-  
-  // Scroll to bottom
+// Helper functions to manage chat messages
+function addPlaceholderToChat(sender, id) {
+  // Create a message element with the given ID
+  const messageElement = document.createElement('div');
+  messageElement.className = `message ${sender}-message`;
+  messageElement.id = id;
+  messageElement.innerHTML = '<div class="typing-indicator">...</div>';
+  chatContainer.appendChild(messageElement);
   chatContainer.scrollTop = chatContainer.scrollHeight;
-  
-  // Return the message ID for updating streaming content
-  return messageId;
+}
+
+function updateResponseInChat(id, text) {
+  const messageElement = document.getElementById(id);
+  if (messageElement) {
+    messageElement.innerHTML = `<p>${text}</p>`;
+    messageElement.scrollIntoView({ behavior: 'smooth' });
+  }
+}
+
+function completeResponseInChat(id, text) {
+  const messageElement = document.getElementById(id);
+  if (messageElement) {
+    messageElement.innerHTML = `<p>${text}</p>`;
+    messageElement.scrollIntoView({ behavior: 'smooth' });
+  }
+}
+
+function addMessageToChat(sender, message) {
+  const messageElement = document.createElement('div');
+  messageElement.className = `message ${sender}-message`;
+  messageElement.innerHTML = `<p>${message}</p>`;
+  chatContainer.appendChild(messageElement);
+  chatContainer.scrollTop = chatContainer.scrollHeight;
 }
 
 // Download model
@@ -276,29 +338,64 @@ async function sendTestPrompt() {
         // Clear the message input
         messageInput.value = '';
         
-        // Add user message to chat
+        // Add user message to chat and history
+        const testMessage = 'test';
         addMessageToChat('test', 'user');
+        addToChatHistory('user', testMessage);
         
-        // Create assistant message container
+        // Create a new unique container for this test response
+        const responseId = 'test-response-' + Date.now();
         const assistantMessageDiv = document.createElement('div');
         assistantMessageDiv.className = 'message assistant';
+        assistantMessageDiv.id = responseId;
         const messageContent = document.createElement('div');
         messageContent.className = 'message-content';
+        messageContent.textContent = '...'; // Initial content
         assistantMessageDiv.appendChild(messageContent);
         chatContainer.appendChild(assistantMessageDiv);
         
-        // Set up response chunk listener
-        window.electronAPI.onStreamingToken(({ token, isComplete }) => {
-            messageContent.textContent = token;
+        // Will hold the aggregated message text
+        let messageText = '';
+        
+        // Clear any previous token listeners
+        const previousListener = window.electronAPI.onStreamingToken(() => {});
+        if (previousListener) previousListener();
+        
+        // Create a custom streaming handler for this specific message
+        const streamingHandler = ({ token, isComplete }) => {
+            // Save this token as the latest response
+            messageText = token;
+            
+            // Update only this message element
+            const thisElement = document.getElementById(responseId);
+            if (thisElement) {
+                const thisContent = thisElement.querySelector('.message-content');
+                if (thisContent) {
+                    thisContent.textContent = messageText;
+                }
+            }
+            
+            // If complete, re-enable test button and add to history
             if (isComplete) {
                 testButton.disabled = false;
+                
+                // Add the assistant's response to chat history
+                addToChatHistory('assistant', messageText);
             }
-        });
+            
+            // Always scroll to the latest message
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+        };
         
-        // Send the test prompt to main process
-        const result = await window.electronAPI.sendMessage('test', []);
+        // Register listener for this message
+        const removeListener = window.electronAPI.onStreamingToken(streamingHandler);
+        
+        // Send the test prompt to main process with current history
+        const result = await window.electronAPI.sendMessage(testMessage, chatHistory);
         
         if (!result.success) {
+            // Remove listener in case of error
+            if (removeListener) removeListener();
             throw new Error(result.error);
         }
     } catch (error) {
@@ -346,4 +443,4 @@ const unlistenDownloadProgress = window.electronAPI.onDownloadProgress((progress
 testButton.addEventListener('click', sendTestPrompt);
 
 // Initialize
-checkModelStatus(); 
+checkModelStatus();
