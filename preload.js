@@ -8,7 +8,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   selectLocalModel: () => ipcRenderer.invoke('select-local-model'),
   
   // Chat functionality
-  sendMessage: (message, history) => ipcRenderer.invoke('chat-message', { message, history }),
+  sendMessage: (message, history, params) => ipcRenderer.invoke('chat-message', { message, history, params }),
+  sendRawChatString: (rawString, params) => ipcRenderer.invoke('raw-chat-string', { rawString, params }),
   
   // Event listeners
   onModelStatus: (callback) => {

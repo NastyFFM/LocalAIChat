@@ -212,6 +212,23 @@
       color: white;
     }
     
+    .reload-model-button {
+      background-color: transparent;
+      color: #e67e22;
+      border: 1px solid #e67e22;
+      border-radius: 4px;
+      padding: 4px 8px;
+      font-size: 12px;
+      cursor: pointer;
+      margin-right: 10px;
+      transition: all 0.2s;
+    }
+    
+    .reload-model-button:hover {
+      background-color: #e67e22;
+      color: white;
+    }
+    
     .hidden {
       display: none;
     }
@@ -227,6 +244,7 @@
       <div class="status-indicator"></div>
       <span id="status-text">Checking model status...</span>
       <div class="model-controls">
+        <button id="reload-model-button" class="reload-model-button">Neu laden</button>
         <button id="change-model-button" class="change-model-button hidden">Change Model</button>
       </div>
     </div>
@@ -247,12 +265,39 @@
     <div id="chat-interface" class="hidden">
       <div id="chat-container" class="chat-container"></div>
       <div class="input-container">
-        <textarea 
-          id="message-input" 
-          placeholder="Type your message here..." 
-          rows="1"></textarea>
-        <button id="send-button" disabled>Send</button>
-        <button id="testButton" class="test-button">Test Prompt</button>
+        <textarea id="message-input" placeholder="Type your message..."></textarea>
+        <button id="send-button">Send</button>
+      </div>
+      
+      <div class="raw-chat-container" style="margin-top: 20px; padding: 15px; border-top: 1px solid #dee2e6;">
+        <textarea id="raw-chat-input" placeholder="Enter raw chat string..." style="width: 100%; height: 100px; margin-bottom: 10px; padding: 12px; border: 1px solid #dee2e6; border-radius: 4px;"></textarea>
+        <button id="raw-chat-button" style="background-color: #4a69bd; color: white; border: none; border-radius: 4px; padding: 12px 24px; cursor: pointer;">Raw Chat String</button>
+      </div>
+
+      <div class="parameters-container" style="margin-top: 20px; padding: 15px; border-top: 1px solid #dee2e6;">
+        <h3 style="margin-bottom: 15px;">Sampling Parameter</h3>
+        
+        <div style="margin-bottom: 15px;">
+          <label for="temperature" style="display: block; margin-bottom: 5px;">Temperature: <span id="temperature-value">1.0</span></label>
+          <input type="range" id="temperature" min="0" max="2" step="0.01" value="1.0" style="width: 100%;">
+        </div>
+        
+        <div style="margin-bottom: 15px;">
+          <label for="top-p" style="display: block; margin-bottom: 5px;">Top P: <span id="top-p-value">0.95</span></label>
+          <input type="range" id="top-p" min="0" max="1" step="0.01" value="0.95" style="width: 100%;">
+        </div>
+        
+        <div style="margin-bottom: 15px;">
+          <label for="max-length" style="display: block; margin-bottom: 5px;">Output Length:</label>
+          <input type="number" id="max-length" value="8192" min="10" max="32768" style="width: 100%; padding: 8px; border: 1px solid #dee2e6; border-radius: 4px;">
+        </div>
+        
+        <div style="margin-bottom: 15px;">
+          <label for="stop-sequence" style="display: block; margin-bottom: 5px;">Stop Sequence:</label>
+          <input type="text" id="stop-sequence" placeholder="Add custom stop sequence" style="width: 100%; padding: 8px; border: 1px solid #dee2e6; border-radius: 4px;">
+        </div>
+        
+        <button id="apply-params-button" style="background-color: #4a69bd; color: white; border: none; border-radius: 4px; padding: 8px 16px; cursor: pointer;">Anwenden</button>
       </div>
     </div>
   </div>

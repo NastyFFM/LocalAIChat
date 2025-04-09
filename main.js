@@ -16,7 +16,7 @@ const MODEL_FILENAME = 'llama-2-7b-chat.Q2_K.gguf';
 function createWindow() {
   console.log("Creating main window");
   mainWindow = new BrowserWindow({
-    width: 1000,
+    width: 1200,
     height: 800,
     webPreferences: {
       nodeIntegration: false,
@@ -65,7 +65,16 @@ function modelExists() {
 
 // Check if a custom model is saved in settings
 function hasCustomModel() {
-  return store.has('customModelPath') && fs.existsSync(store.get('customModelPath'));
+  const customPath = store.get('customModelPath');
+  const exists = customPath && fs.existsSync(customPath);
+  
+  // If path is stored but file doesn't exist, log a warning but don't show error to user
+  if (customPath && !exists) {
+    console.warn(`Saved model path exists but file not found: ${customPath}`);
+    // Returning false will trigger the download view to be shown
+  }
+  
+  return exists;
 }
 
 // Get the custom model path from settings
@@ -263,9 +272,10 @@ async function initializeModel(customModelPath = null) {
 
         // Verify model file exists and is readable
         if (!fs.existsSync(modelPath)) {
-            console.error(`Model file not found at path: ${modelPath}`);
-            updateModelStatus('error', `Model file not found at path: ${modelPath}`);
-            throw new Error(`Model file not found at path: ${modelPath}`);
+            const errorMessage = `Model file not found at path: ${modelPath}`;
+            console.error(errorMessage);
+            updateModelStatus('error', `Model nicht gefunden`);
+            throw new Error(errorMessage);
         }
 
         try {
@@ -393,206 +403,226 @@ async function ensureModelExists() {
 }
 
 // Process chat message
-async function processChatMessage(message, history) {
-  if (!model) {
-    console.log("No model loaded, initializing model first");
-    await initializeModel();
-  }
-  
-  try {
-    // Get the model path to determine the model type
-    let modelPath = "";
-    if (hasCustomModel()) {
-      modelPath = getCustomModelPath();
-    } else if (modelExists()) {
-      modelPath = path.join(getModelsPath(), MODEL_FILENAME);
-    }
-    
-    const modelName = path.basename(modelPath).toLowerCase();
-    
-    // Format messages using the exact required structure for Gemma 3
-    const messages = [];
-
-    // Add conversation history
-    if (history.length > 0) {
-      for (const entry of history) {
-        messages.push(
-          {
-            role: "user",
-            content: [{
-              type: "text",
-              text: entry.user
-            }]
-          },
-          {
-            role: "assistant",
-            content: [{
-              type: "text",
-              text: entry.assistant
-            }]
-          }
-        );
-      }
+async function processChatMessage(message, history, params = null) {
+    if (!model) {
+        throw new Error('Model not initialized');
     }
 
-    // Add current message
-    messages.push({
-      role: "user",
-      content: [{
-        type: "text",
-        text: message
-      }]
-    });
+    // Default parameters
+    const defaultParams = {
+        temperature: 1.0,
+        top_p: 0.95,
+        max_length: 8192,
+        stop_sequence: '<end_of_turn>'
+    };
 
-    console.log("Generating response with Gemma 3 chat template format");
-    console.log("Messages:", JSON.stringify(messages, null, 2));
-    
-    // Using the raw sequence-based approach from the documentation
+    // Merge with provided parameters
+    const modelParams = { ...defaultParams, ...(params || {}) };
+    console.log('Using model parameters:', modelParams);
+
     try {
-      console.log("Creating context");
-      const context = await model.createContext();
-      console.log("Context created successfully");
-      
-      console.log("Getting sequence");
-      const sequence = context.getSequence();
-      console.log("Sequence obtained");
-      
-      // Format the prompt using Gemma 3's chat template format
-      let prompt = "";
-      
-      // Add system instruction in bos token
-      prompt += `<bos>Du bist ein hilfreiches KI-Modell. Antworte höflich und informativ auf die Fragen des Nutzers.`;
-      
-      // Process each message according to the template
-      console.log("Processing messages to build prompt");
-      for (let i = 0; i < messages.length; i++) {
-        const msg = messages[i];
-        console.log(`Processing message ${i+1}/${messages.length}, role: ${msg.role}`);
+        // Format messages using Gemma 3's specific format with predefined system prompt
+        let prompt = '<bos>';
         
-        // Extract the text content from the content array
-        let textContent = "";
-        if (msg.content && Array.isArray(msg.content)) {
-          // Extract text from content array
-          textContent = msg.content
-            .filter(item => item.type === "text")
-            .map(item => item.text)
-            .join(" ");
-        } else if (typeof msg.content === "string") {
-          // For backward compatibility if content is a string
-          textContent = msg.content;
-        } else {
-          console.warn(`Unexpected content format in message ${i}:`, msg.content);
-          textContent = JSON.stringify(msg.content);
+        // Add predefined initial conversation
+        prompt += `<start_of_turn>user
+Du bist ein intelligenter, empathischer und praktischer Assistent. Deine Aufgabe ist es, mir bei allem zu helfen, was ich brauche – egal ob emotional, sozial, technisch, kreativ oder organisatorisch. Du stellst die richtigen Fragen, gibst kluge, klare Antworten und unterstützt mich dabei, Dinge zu verstehen, Probleme zu lösen oder Entscheidungen zu treffen. Wenn ich blockiert bin, hilfst du mir, weiterzukommen. Sei ehrlich, direkt, aber mitfühlend.
+
+Ich will mit dir sprechen, wenn ich Hilfe brauche, mich sortieren will oder nicht weiterweiß.
+
+Okay, ich hab gerade das Gefühl, ich weiß gar nicht, wo ich anfangen soll. Alles ist zu viel.<end_of_turn>`;
+        
+        prompt += `<start_of_turn>model
+Das Gefühl kenn ich – wenn alles gleichzeitig drückt, ist es schwer, klar zu sehen. Lass uns einen Schritt nach dem anderen machen.  
+
+Was genau fühlt sich gerade am meisten nach "zu viel" an? Arbeit, Gedanken, Gefühle, Aufgaben… was drückt am stärksten?<end_of_turn>`;
+        
+        // Add conversation history
+        if (history && history.length > 0) {
+            for (const entry of history) {
+                prompt += `<start_of_turn>user\n${entry.user}<end_of_turn>`;
+                prompt += `<start_of_turn>model\n${entry.assistant}<end_of_turn>`;
+            }
         }
-        
-        if (msg.role === "user") {
-          prompt += `<start_of_turn>user\n${textContent}<end_of_turn>\n`;
-          console.log(`Added user message: "${textContent.substring(0, 30)}${textContent.length > 30 ? '...' : ''}"`);
-        } else if (msg.role === "model" || msg.role === "assistant") {
-          prompt += `<start_of_turn>model\n${textContent}`;
-          console.log(`Added ${msg.role} message: "${textContent.substring(0, 30)}${textContent.length > 30 ? '...' : ''}"`);
-          if (i < messages.length - 1) {
-            prompt += `<end_of_turn>\n`;
-            console.log("Added end_of_turn token");
-          } else {
-            console.log("No end_of_turn token added (last message)");
-          }
-        }
-      }
-      
-      // If this is a test message, add the second part of the test prompt exactly as specified
-      if (message === "test" && messages.length === 1) {
-        console.log("Adding test prompt special case");
-        prompt += `Hallo! Wie kann ich dir helfen?<end_of_turn>\n<start_of_turn>user\nwie gehts dir<end_of_turn>\n`;
-      }
-      
-      // Log the complete prompt
-      console.log("Complete prompt structure:");
-      console.log(JSON.stringify(messages, null, 2));
-      console.log("\nComplete formatted prompt:");
-      console.log(prompt);
-      
-      console.log("Tokenizing prompt");
-      const tokens = model.tokenize(prompt);
-      console.log(`Tokenized prompt into ${tokens.length} tokens`);
-      
-      // Array to collect generated tokens
-      const responseTokens = [];
-      console.log("Starting token generation");
-      
-      // Define a stopCondition function
-      const stopCondition = (text) => {
-        // Stop on end_of_turn token
-        if (text.includes("<end_of_turn>")) {
-          return true;
-        }
-        
-        // Common stop condition
-        if (responseTokens.length > 800) {
-          return true;
-        }
-        
-        return false;
-      };
-      
-      try {
-        // Use the evaluate generator to process tokens one by one
-        for await (const generatedToken of sequence.evaluate(tokens)) {
-          responseTokens.push(generatedToken);
-          
-          // Send the current token to the frontend
-          const currentText = model.detokenize(responseTokens);
-          mainWindow.webContents.send('streaming-token', {
-            token: currentText,
-            isComplete: false
-          });
-          
-          // Check if we should stop generation
-          if (stopCondition(currentText)) {
-            console.log("Stop condition met, halting generation");
-            break;
-          }
-        }
-        
-        // Send final complete response
-        let responseText = model.detokenize(responseTokens);
-        console.log("Response generation completed");
-        
-        // Clean up the response
-        responseText = responseText
-          .replace(/<end_of_turn>/, '')
-          .replace(/<start_of_turn>model\n/, '')
-          .replace(/<start_of_turn>user\n/, '')
-          .replace(/<bos>.*?<start_of_turn>/, '') // Remove bos token and its content
-          .trim();
-        
-        // Send the final response
-        mainWindow.webContents.send('streaming-token', {
-          token: responseText,
-          isComplete: true
+
+        // Add current message
+        prompt += `<start_of_turn>user\n${message}<end_of_turn>`;
+        // Add model turn to indicate it's the model's turn to respond
+        prompt += `<start_of_turn>model\n`;
+
+        // Create context and get sequence
+        const context = await model.createContext({
+            temperature: modelParams.temperature,
+            top_p: modelParams.top_p
         });
+        const sequence = context.getSequence();
+
+        // Tokenize the prompt
+        const tokens = model.tokenize(prompt);
+        console.log('Tokenized prompt length:', tokens.length);
+
+        // Generate response
+        let response = '';
+        const stopCondition = (text) => {
+            // Stop on end_of_turn token
+            if (text.includes('<end_of_turn>')) {
+                return true;
+            }
+            // Stop on custom stop sequence
+            if (modelParams.stop_sequence && 
+                modelParams.stop_sequence !== '<end_of_turn>' && 
+                text.includes(modelParams.stop_sequence)) {
+                return true;
+            }
+            // Stop on max length
+            if (response.length > modelParams.max_length) {
+                return true;
+            }
+            return false;
+        };
+
+        for await (const token of sequence.evaluate(tokens)) {
+            const tokenText = model.detokenize([token]);
+            response += tokenText;
+            
+            // Send token to renderer
+            mainWindow.webContents.send('streaming-token', {
+                token: tokenText,
+                isComplete: false
+            });
+
+            if (stopCondition(response)) {
+                break;
+            }
+        }
+
+        // Clean up response by removing the end_of_turn token
+        response = response.replace(/<end_of_turn>.*$/, '').trim();
         
-        return responseText;
-      } catch (evaluateError) {
-        console.error("Error during token generation:", evaluateError);
-        throw evaluateError;
-      }
+        // If custom stop sequence is used, remove it too
+        if (modelParams.stop_sequence && 
+            modelParams.stop_sequence !== '<end_of_turn>') {
+            response = response.replace(new RegExp(modelParams.stop_sequence + '.*$'), '').trim();
+        }
+
+        // Log the AI's response
+        console.log('AI Response:', response);
+
+        // Send final complete response
+        mainWindow.webContents.send('streaming-token', {
+            token: response,
+            isComplete: true
+        });
+
+        return response;
     } catch (error) {
-      console.error("Error processing chat message:", error);
-      mainWindow.webContents.send('streaming-token', {
-        token: `Error: ${error.message}`,
-        isComplete: true
-      });
-      throw error;
+        console.error('Error processing chat message:', error);
+        mainWindow.webContents.send('streaming-token', {
+            token: `Error: ${error.message}`,
+            isComplete: true
+        });
+        throw error;
     }
-  } catch (error) {
-    console.error("Error processing chat message:", error);
-    mainWindow.webContents.send('streaming-token', {
-      token: `Error: ${error.message}`,
-      isComplete: true
-    });
-    throw error;
-  }
+}
+
+// Process raw chat string
+async function processRawChatString(rawString, params = null) {
+    if (!model) {
+        throw new Error('Model not initialized');
+    }
+
+    if (!mainWindow) {
+        throw new Error('Main window not initialized');
+    }
+
+    // Default parameters
+    const defaultParams = {
+        temperature: 1.0,
+        top_p: 0.95,
+        max_length: 8192,
+        stop_sequence: '<end_of_turn>'
+    };
+
+    // Merge with provided parameters
+    const modelParams = { ...defaultParams, ...(params || {}) };
+    console.log('Using model parameters:', modelParams);
+
+    try {
+        // Create context and get sequence
+        const context = await model.createContext({
+            temperature: modelParams.temperature,
+            top_p: modelParams.top_p
+        });
+        const sequence = context.getSequence();
+
+        // Tokenize the prompt
+        const tokens = model.tokenize(rawString);
+        console.log('Tokenized prompt length:', tokens.length);
+
+        // Generate response
+        let response = '';
+        const stopCondition = (text) => {
+            // Stop on end_of_turn token
+            if (text.includes('<end_of_turn>')) {
+                return true;
+            }
+            // Stop on custom stop sequence
+            if (modelParams.stop_sequence && 
+                modelParams.stop_sequence !== '<end_of_turn>' && 
+                text.includes(modelParams.stop_sequence)) {
+                return true;
+            }
+            // Stop on max length
+            if (response.length > modelParams.max_length) {
+                return true;
+            }
+            return false;
+        };
+
+        for await (const token of sequence.evaluate(tokens)) {
+            const tokenText = model.detokenize([token]);
+            response += tokenText;
+            
+            // Send token to renderer
+            mainWindow.webContents.send('streaming-token', {
+                token: tokenText,
+                isComplete: false
+            });
+
+            if (stopCondition(response)) {
+                break;
+            }
+        }
+
+        // Clean up response by removing the end_of_turn token
+        response = response.replace(/<end_of_turn>.*$/, '').trim();
+        
+        // If custom stop sequence is used, remove it too
+        if (modelParams.stop_sequence && 
+            modelParams.stop_sequence !== '<end_of_turn>') {
+            response = response.replace(new RegExp(modelParams.stop_sequence + '.*$'), '').trim();
+        }
+
+        // Log the AI's response
+        console.log('AI Response:', response);
+
+        // Send final complete response
+        mainWindow.webContents.send('streaming-token', {
+            token: response,
+            isComplete: true
+        });
+
+        return response;
+    } catch (error) {
+        console.error('Error processing raw chat string:', error);
+        if (mainWindow) {
+            mainWindow.webContents.send('streaming-token', {
+                token: `Error: ${error.message}`,
+                isComplete: true
+            });
+        }
+        throw error;
+    }
 }
 
 // App ready event
@@ -623,9 +653,9 @@ function setupIPCHandlers() {
   ipcMain.handle('chat-message', async (event, params) => {
     console.log("IPC: chat-message received", params);
     try {
-      const { message, history } = params;
+      const { message, history, params: modelParams } = params;
       console.log(`Processing message: "${message}" with history length: ${history.length}`);
-      const result = await processChatMessage(message, history);
+      const result = await processChatMessage(message, history, modelParams);
       console.log("IPC: chat-message processed");
       return result;
     } catch (error) {
@@ -681,6 +711,20 @@ function setupIPCHandlers() {
       }
     } catch (error) {
       console.error("IPC: select-local-model error:", error);
+      return { success: false, error: error.message };
+    }
+  });
+  
+  // Handle raw chat string
+  ipcMain.handle('raw-chat-string', async (event, params) => {
+    console.log("IPC: raw-chat-string received");
+    try {
+      const { rawString, params: modelParams } = params;
+      const result = await processRawChatString(rawString, modelParams);
+      console.log("IPC: raw-chat-string processed");
+      return result;
+    } catch (error) {
+      console.error("IPC: raw-chat-string error:", error);
       return { success: false, error: error.message };
     }
   });

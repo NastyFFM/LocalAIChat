@@ -5,6 +5,7 @@ const downloadSection = document.getElementById('download-section');
 const downloadButton = document.getElementById('download-button');
 const localModelButton = document.getElementById('local-model-button');
 const changeModelButton = document.getElementById('change-model-button');
+const reloadModelButton = document.getElementById('reload-model-button');
 const progressContainer = document.getElementById('progress-container');
 const progressBar = document.getElementById('progress-bar');
 const downloadStatus = document.getElementById('download-status');
@@ -13,6 +14,79 @@ const chatContainer = document.getElementById('chat-container');
 const messageInput = document.getElementById('message-input');
 const sendButton = document.getElementById('send-button');
 const testButton = document.getElementById('testButton');
+const rawChatInput = document.getElementById('raw-chat-input');
+const rawChatButton = document.getElementById('raw-chat-button');
+
+// Sampling parameters
+const temperatureSlider = document.getElementById('temperature');
+const temperatureValue = document.getElementById('temperature-value');
+const topPSlider = document.getElementById('top-p');
+const topPValue = document.getElementById('top-p-value');
+const maxLengthInput = document.getElementById('max-length');
+const stopSequenceInput = document.getElementById('stop-sequence');
+const applyParamsButton = document.getElementById('apply-params-button');
+
+// Default parameters
+let modelParams = {
+  temperature: 1.0,
+  top_p: 0.95,
+  max_length: 8192,
+  stop_sequence: '<end_of_turn>'
+};
+
+// Update parameter display
+temperatureSlider.addEventListener('input', () => {
+  const value = parseFloat(temperatureSlider.value);
+  temperatureValue.textContent = value.toFixed(2);
+  modelParams.temperature = value;
+});
+
+topPSlider.addEventListener('input', () => {
+  const value = parseFloat(topPSlider.value);
+  topPValue.textContent = value.toFixed(2);
+  modelParams.top_p = value;
+});
+
+// Apply parameters
+applyParamsButton.addEventListener('click', () => {
+  modelParams.max_length = parseInt(maxLengthInput.value, 10);
+  modelParams.stop_sequence = stopSequenceInput.value || '<end_of_turn>';
+  
+  // Save to localStorage
+  localStorage.setItem('modelParams', JSON.stringify(modelParams));
+  
+  // Notify user
+  alert('Parameter wurden angewendet!');
+});
+
+// Load saved parameters from localStorage
+function loadSavedParameters() {
+  const savedParams = localStorage.getItem('modelParams');
+  if (savedParams) {
+    try {
+      const params = JSON.parse(savedParams);
+      modelParams = { ...modelParams, ...params };
+      
+      // Update UI
+      temperatureSlider.value = modelParams.temperature;
+      temperatureValue.textContent = modelParams.temperature.toFixed(2);
+      
+      topPSlider.value = modelParams.top_p;
+      topPValue.textContent = modelParams.top_p.toFixed(2);
+      
+      maxLengthInput.value = modelParams.max_length;
+      
+      if (modelParams.stop_sequence && modelParams.stop_sequence !== '<end_of_turn>') {
+        stopSequenceInput.value = modelParams.stop_sequence;
+      }
+    } catch (e) {
+      console.error('Error loading saved parameters:', e);
+    }
+  }
+}
+
+// Initialize parameters
+loadSavedParameters();
 
 // Chat history
 let chatHistory = [];
@@ -116,8 +190,8 @@ async function sendMessage() {
       }
     });
     
-    // Send message to main process
-    await window.electronAPI.sendMessage(message, chatHistory);
+    // Send message to main process with parameters
+    await window.electronAPI.sendMessage(message, chatHistory, modelParams);
     
   } catch (error) {
     console.error('Error sending message:', error);
@@ -308,18 +382,98 @@ async function sendTestPrompt() {
     }
 }
 
+// Handle raw chat string
+async function sendRawChatString() {
+  const rawString = rawChatInput.value.trim();
+  if (!rawString) return;
+  
+  // Disable input while processing
+  rawChatInput.disabled = true;
+  rawChatButton.disabled = true;
+  
+  try {
+    // Create a placeholder for the assistant's response
+    const assistantMessageId = addMessageToChat('', 'assistant');
+    let lastToken = '';
+    
+    // Set up streaming listener
+    const removeStreamingListener = window.electronAPI.onStreamingToken((data) => {
+      const assistantMessage = document.getElementById(assistantMessageId);
+      if (assistantMessage) {
+        // Extract only the new part of the token
+        const newContent = data.token.slice(lastToken.length);
+        assistantMessage.querySelector('.message-content').textContent = data.token;
+        lastToken = data.token;
+      }
+      
+      // If the response is complete, update chat history
+      if (data.isComplete) {
+        removeStreamingListener();
+        rawChatInput.disabled = false;
+        rawChatButton.disabled = false;
+        rawChatInput.focus();
+      }
+    });
+    
+    // Send raw string to main process with parameters
+    await window.electronAPI.sendRawChatString(rawString, modelParams);
+    
+  } catch (error) {
+    console.error('Error sending raw chat string:', error);
+    updateStatus('error', 'Error sending raw chat string');
+    rawChatInput.disabled = false;
+    rawChatButton.disabled = false;
+    rawChatInput.focus();
+  }
+}
+
+// Reload model from a new location
+async function reloadModel() {
+  try {
+    reloadModelButton.disabled = true;
+    updateStatus('loading', 'Selecting new model path...');
+    
+    const result = await window.electronAPI.selectLocalModel();
+    
+    if (result.success) {
+      updateStatus('ready', `Model loaded from new path: ${result.path}`);
+      reloadModelButton.disabled = false;
+    } else {
+      if (result.error !== 'Model selection canceled') {
+        updateStatus('error', `Failed to load model: ${result.error}`);
+      } else {
+        updateStatus('error', 'Model selection canceled');
+      }
+      reloadModelButton.disabled = false;
+    }
+  } catch (error) {
+    console.error('Error reloading model:', error);
+    updateStatus('error', `Error reloading model: ${error.message}`);
+    reloadModelButton.disabled = false;
+  }
+}
+
 // Event Listeners
 downloadButton.addEventListener('click', downloadModel);
 localModelButton.addEventListener('click', selectLocalModel);
 changeModelButton.addEventListener('click', changeModel);
+reloadModelButton.addEventListener('click', reloadModel);
 
 sendButton.addEventListener('click', sendMessage);
+rawChatButton.addEventListener('click', sendRawChatString);
 
 messageInput.addEventListener('keydown', (event) => {
   if (event.key === 'Enter' && !event.shiftKey) {
     event.preventDefault();
     sendMessage();
   }
+});
+
+rawChatInput.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter' && event.ctrlKey) {
+        event.preventDefault();
+        sendRawChatString();
+    }
 });
 
 // Listen for model status updates
