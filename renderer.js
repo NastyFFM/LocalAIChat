@@ -37,6 +37,13 @@ const maxLengthInput = document.getElementById('max-length');
 const stopSequenceInput = document.getElementById('stop-sequence');
 const applyParamsButton = document.getElementById('apply-params-button');
 
+// Chat sidebar
+const chatSidebar = document.getElementById('chat-sidebar');
+const settingsPanel = document.getElementById('settings-panel');
+const closeSettingsButton = document.getElementById('close-settings-button');
+const chatSearch = document.getElementById('chat-search');
+const clearSearchButton = document.getElementById('clear-search');
+
 // Validate DOM elements
 function validateDOMElements() {
   // Check that all required elements exist
@@ -286,7 +293,8 @@ function createNewChat() {
     updatedAt: new Date().toISOString()
   };
   
-  allChats.push(newChat);
+  // Add new chat to the beginning of the array
+  allChats.unshift(newChat);
   saveAllChats();
   
   // Set the current chat and update UI
@@ -311,6 +319,7 @@ function setCurrentChat(chatId) {
 function renderChatList() {
   chatList.innerHTML = '';
   
+  // No need to sort, as we're now adding new chats to the beginning of the array
   allChats.forEach(chat => {
     const chatItem = document.createElement('div');
     chatItem.className = `chat-item ${chat.id === currentChatId ? 'active' : ''}`;
@@ -439,7 +448,7 @@ function deleteChat(chatId) {
     if (allChats.length === 0) {
       createNewChat();
     } else {
-      // Load the first available chat
+      // Load the most recent chat (now at index 0)
       loadChat(allChats[0].id);
     }
   }
@@ -548,8 +557,8 @@ function showChatInterface() {
   if (allChats.length === 0) {
     createNewChat();
   } else {
-    // Load the most recent chat
-    loadChat(allChats[allChats.length - 1].id);
+    // Load the most recent chat (now at index 0)
+    loadChat(allChats[0].id);
   }
   
   messageInput.focus();
@@ -926,4 +935,42 @@ const unlistenDownloadProgress = window.electronAPI.onDownloadProgress((progress
 testButton.addEventListener('click', sendTestPrompt);
 
 // Initialize
-checkModelStatus(); 
+checkModelStatus();
+
+// Initialize search functionality
+function initializeSearch() {
+  if (!chatSearch || !clearSearchButton) return;
+  
+  chatSearch.addEventListener('input', function() {
+    filterChats(this.value.toLowerCase().trim());
+  });
+  
+  clearSearchButton.addEventListener('click', function() {
+    chatSearch.value = '';
+    filterChats('');
+  });
+}
+
+// Filter chats based on search query
+function filterChats(query) {
+  const chatItems = document.querySelectorAll('.chat-item');
+  
+  chatItems.forEach(item => {
+    const title = item.querySelector('.chat-title').textContent.toLowerCase();
+    if (query === '' || title.includes(query)) {
+      item.style.display = 'flex';
+    } else {
+      item.style.display = 'none';
+    }
+  });
+}
+
+// Add initializeSearch to existing event listeners
+document.addEventListener('DOMContentLoaded', function() {
+  validateDOMElements();
+  loadSavedParameters();
+  
+  // Initialize the chat interface and search functionality
+  showChatInterface();
+  initializeSearch();
+}); 
