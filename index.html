@@ -336,6 +336,143 @@
       background-color: rgba(0, 0, 0, 0.05);
       font-weight: 600;
     }
+    
+    /* Settings Button */
+    .settings-button {
+      background-color: transparent;
+      color: #555;
+      border: none;
+      border-radius: 4px;
+      padding: 8px 12px;
+      cursor: pointer;
+      font-size: 18px;
+      transition: all 0.2s;
+    }
+    
+    .settings-button:hover {
+      background-color: rgba(0, 0, 0, 0.05);
+    }
+    
+    /* Modal Dialog */
+    .modal {
+      display: none;
+      position: fixed;
+      z-index: 1000;
+      left: 0;
+      top: 0;
+      width: 100%;
+      height: 100%;
+      background-color: rgba(0, 0, 0, 0.5);
+      overflow: auto;
+    }
+    
+    .modal-content {
+      position: relative;
+      background-color: #fefefe;
+      margin: 5% auto;
+      padding: 0;
+      border-radius: 8px;
+      width: 80%;
+      max-width: 800px;
+      box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+      animation: modalFadeIn 0.3s;
+    }
+    
+    @keyframes modalFadeIn {
+      from {opacity: 0; transform: translateY(-20px);}
+      to {opacity: 1; transform: translateY(0);}
+    }
+    
+    .modal-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 15px 20px;
+      background-color: #f5f5f5;
+      border-bottom: 1px solid #dee2e6;
+      border-top-left-radius: 8px;
+      border-top-right-radius: 8px;
+    }
+    
+    .modal-header h2 {
+      margin: 0;
+      color: #333;
+      font-size: 18px;
+    }
+    
+    .close-modal {
+      color: #aaa;
+      font-size: 24px;
+      font-weight: bold;
+      cursor: pointer;
+    }
+    
+    .close-modal:hover {
+      color: #333;
+    }
+    
+    .modal-body {
+      padding: 20px;
+      max-height: 70vh;
+      overflow-y: auto;
+    }
+    
+    /* Settings Modal Content Styles */
+    .parameters-container, .raw-chat-container {
+      margin-bottom: 30px;
+    }
+    
+    .parameters-container h3, .raw-chat-container h3 {
+      margin-bottom: 15px;
+      font-size: 16px;
+      color: #333;
+    }
+    
+    .parameter-group {
+      margin-bottom: 15px;
+    }
+    
+    .parameter-group label {
+      display: block;
+      margin-bottom: 5px;
+      font-size: 14px;
+    }
+    
+    .parameter-group input[type="range"] {
+      width: 100%;
+    }
+    
+    .parameter-group input[type="number"],
+    .parameter-group input[type="text"] {
+      width: 100%;
+      padding: 8px;
+      border: 1px solid #dee2e6;
+      border-radius: 4px;
+    }
+    
+    #raw-chat-input {
+      width: 100%;
+      height: 100px;
+      margin-bottom: 10px;
+      padding: 12px;
+      border: 1px solid #dee2e6;
+      border-radius: 4px;
+      resize: vertical;
+    }
+    
+    #raw-chat-button, #apply-params-button {
+      background-color: #4a69bd;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      padding: 8px 16px;
+      cursor: pointer;
+      font-size: 14px;
+    }
+    
+    #raw-chat-button:hover, #apply-params-button:hover {
+      background-color: #3e5ba9;
+    }
   </style>
   <script src="renderer.js" defer></script>
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
@@ -374,37 +511,60 @@
       <div class="input-container">
         <textarea id="message-input" placeholder="Type your message..."></textarea>
         <button id="send-button">Send</button>
+        <button id="settings-button" class="settings-button" title="Settings">⚙️</button>
       </div>
       
-      <div class="raw-chat-container" style="margin-top: 20px; padding: 15px; border-top: 1px solid #dee2e6;">
-        <textarea id="raw-chat-input" placeholder="Enter raw chat string..." style="width: 100%; height: 100px; margin-bottom: 10px; padding: 12px; border: 1px solid #dee2e6; border-radius: 4px;"></textarea>
-        <button id="raw-chat-button" style="background-color: #4a69bd; color: white; border: none; border-radius: 4px; padding: 12px 24px; cursor: pointer;">Raw Chat String</button>
+      <!-- Modal Dialog for Settings -->
+      <div id="settings-modal" class="modal">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h2>Settings</h2>
+            <span class="close-modal">&times;</span>
+          </div>
+          
+          <div class="modal-body">
+            <div class="parameters-container">
+              <h3>Sampling Parameters</h3>
+              
+              <div class="parameter-group">
+                <label for="temperature">Temperature: <span id="temperature-value">1.0</span></label>
+                <input type="range" id="temperature" min="0" max="2" step="0.01" value="1.0">
+              </div>
+              
+              <div class="parameter-group">
+                <label for="top-p">Top P: <span id="top-p-value">0.95</span></label>
+                <input type="range" id="top-p" min="0" max="1" step="0.01" value="0.95">
+              </div>
+              
+              <div class="parameter-group">
+                <label for="max-length">Output Length:</label>
+                <input type="number" id="max-length" value="8192" min="10" max="32768">
+              </div>
+              
+              <div class="parameter-group">
+                <label for="stop-sequence">Stop Sequence:</label>
+                <input type="text" id="stop-sequence" placeholder="Add custom stop sequence">
+              </div>
+              
+              <button id="apply-params-button">Apply Parameters</button>
+            </div>
+            
+            <div class="raw-chat-container">
+              <h3>Raw Chat String</h3>
+              <textarea id="raw-chat-input" placeholder="Enter raw chat string..."></textarea>
+              <button id="raw-chat-button">Send Raw Chat String</button>
+            </div>
+          </div>
+        </div>
       </div>
-
-      <div class="parameters-container" style="margin-top: 20px; padding: 15px; border-top: 1px solid #dee2e6;">
-        <h3 style="margin-bottom: 15px;">Sampling Parameter</h3>
-        
-        <div style="margin-bottom: 15px;">
-          <label for="temperature" style="display: block; margin-bottom: 5px;">Temperature: <span id="temperature-value">1.0</span></label>
-          <input type="range" id="temperature" min="0" max="2" step="0.01" value="1.0" style="width: 100%;">
-        </div>
-        
-        <div style="margin-bottom: 15px;">
-          <label for="top-p" style="display: block; margin-bottom: 5px;">Top P: <span id="top-p-value">0.95</span></label>
-          <input type="range" id="top-p" min="0" max="1" step="0.01" value="0.95" style="width: 100%;">
-        </div>
-        
-        <div style="margin-bottom: 15px;">
-          <label for="max-length" style="display: block; margin-bottom: 5px;">Output Length:</label>
-          <input type="number" id="max-length" value="8192" min="10" max="32768" style="width: 100%; padding: 8px; border: 1px solid #dee2e6; border-radius: 4px;">
-        </div>
-        
-        <div style="margin-bottom: 15px;">
-          <label for="stop-sequence" style="display: block; margin-bottom: 5px;">Stop Sequence:</label>
-          <input type="text" id="stop-sequence" placeholder="Add custom stop sequence" style="width: 100%; padding: 8px; border: 1px solid #dee2e6; border-radius: 4px;">
-        </div>
-        
-        <button id="apply-params-button" style="background-color: #4a69bd; color: white; border: none; border-radius: 4px; padding: 8px 16px; cursor: pointer;">Anwenden</button>
+      
+      <div class="raw-chat-container" style="display: none;">
+        <textarea id="raw-chat-input-hidden"></textarea>
+        <button id="raw-chat-button-hidden">Raw Chat String</button>
+      </div>
+      
+      <div class="parameters-container" style="display: none;">
+        <h3>Sampling Parameter</h3>
       </div>
     </div>
   </div>

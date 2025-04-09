@@ -16,6 +16,9 @@ const sendButton = document.getElementById('send-button');
 const testButton = document.getElementById('testButton');
 const rawChatInput = document.getElementById('raw-chat-input');
 const rawChatButton = document.getElementById('raw-chat-button');
+const settingsButton = document.getElementById('settings-button');
+const settingsModal = document.getElementById('settings-modal');
+const closeModalButton = document.querySelector('.close-modal');
 
 // Sampling parameters
 const temperatureSlider = document.getElementById('temperature');
@@ -25,6 +28,33 @@ const topPValue = document.getElementById('top-p-value');
 const maxLengthInput = document.getElementById('max-length');
 const stopSequenceInput = document.getElementById('stop-sequence');
 const applyParamsButton = document.getElementById('apply-params-button');
+
+// Validate DOM elements
+function validateDOMElements() {
+  // Check that all required elements exist
+  if (!rawChatInput || !rawChatButton) {
+    console.error('Raw chat elements not found in the DOM. Using fallbacks.');
+    // Use hidden elements as fallbacks if they exist
+    if (document.getElementById('raw-chat-input-hidden')) {
+      rawChatInput = document.getElementById('raw-chat-input-hidden');
+    }
+    if (document.getElementById('raw-chat-button-hidden')) {
+      rawChatButton = document.getElementById('raw-chat-button-hidden');
+    }
+  }
+  
+  // Ensure all required DOM elements are available
+  if (!settingsModal || !closeModalButton || !settingsButton) {
+    console.error('Settings modal elements not found in the DOM');
+  }
+  
+  if (!temperatureSlider || !topPSlider || !maxLengthInput || !stopSequenceInput || !applyParamsButton) {
+    console.error('Sampling parameter elements not found in the DOM');
+  }
+}
+
+// Call validation on page load
+validateDOMElements();
 
 // Default parameters
 let modelParams = {
@@ -106,6 +136,105 @@ function processMarkdown(text) {
   const rawHtml = marked.parse(text);
   return DOMPurify.sanitize(rawHtml);
 }
+
+// Setup event listeners for UI elements
+function setupEventListeners() {
+  // Chat interface
+  if (sendButton) {
+    sendButton.addEventListener('click', sendMessage);
+  }
+  
+  if (messageInput) {
+    messageInput.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' && !event.shiftKey) {
+        event.preventDefault();
+        sendMessage();
+      }
+    });
+  }
+  
+  // Settings modal
+  if (settingsButton && settingsModal) {
+    settingsButton.addEventListener('click', openSettingsModal);
+  }
+  
+  if (closeModalButton) {
+    closeModalButton.addEventListener('click', closeSettingsModal);
+  }
+  
+  if (settingsModal) {
+    window.addEventListener('click', (event) => {
+      if (event.target === settingsModal) {
+        closeSettingsModal();
+      }
+    });
+  }
+  
+  // Raw chat string
+  if (rawChatButton) {
+    rawChatButton.addEventListener('click', sendRawChatString);
+  }
+  
+  if (rawChatInput) {
+    rawChatInput.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' && event.ctrlKey) {
+        event.preventDefault();
+        sendRawChatString();
+      }
+    });
+  }
+  
+  // Parameter sliders
+  if (temperatureSlider && temperatureValue) {
+    temperatureSlider.addEventListener('input', () => {
+      const value = parseFloat(temperatureSlider.value);
+      temperatureValue.textContent = value.toFixed(2);
+      modelParams.temperature = value;
+    });
+  }
+  
+  if (topPSlider && topPValue) {
+    topPSlider.addEventListener('input', () => {
+      const value = parseFloat(topPSlider.value);
+      topPValue.textContent = value.toFixed(2);
+      modelParams.top_p = value;
+    });
+  }
+  
+  if (applyParamsButton) {
+    applyParamsButton.addEventListener('click', () => {
+      if (maxLengthInput) {
+        modelParams.max_length = parseInt(maxLengthInput.value, 10);
+      }
+      
+      if (stopSequenceInput) {
+        modelParams.stop_sequence = stopSequenceInput.value || '<end_of_turn>';
+      }
+      
+      // Save to localStorage
+      localStorage.setItem('modelParams', JSON.stringify(modelParams));
+      
+      // Notify user
+      alert('Parameter wurden angewendet!');
+    });
+  }
+  
+  // Model-related buttons
+  if (downloadButton) {
+    downloadButton.addEventListener('click', downloadModel);
+  }
+  
+  if (localModelButton) {
+    localModelButton.addEventListener('click', selectLocalModel);
+  }
+  
+  if (changeModelButton) {
+    changeModelButton.addEventListener('click', changeModel);
+  }
+}
+
+// Call setup function
+setupEventListeners();
 
 // Chat history
 let chatHistory = [];
@@ -492,28 +621,18 @@ async function reloadModel() {
   }
 }
 
-// Event Listeners
-downloadButton.addEventListener('click', downloadModel);
-localModelButton.addEventListener('click', selectLocalModel);
-changeModelButton.addEventListener('click', changeModel);
-reloadModelButton.addEventListener('click', reloadModel);
+// Settings Modal Functions
+function openSettingsModal() {
+  settingsModal.style.display = 'block';
+  // Prevent scrolling on the body when modal is open
+  document.body.style.overflow = 'hidden';
+}
 
-sendButton.addEventListener('click', sendMessage);
-rawChatButton.addEventListener('click', sendRawChatString);
-
-messageInput.addEventListener('keydown', (event) => {
-  if (event.key === 'Enter' && !event.shiftKey) {
-    event.preventDefault();
-    sendMessage();
-  }
-});
-
-rawChatInput.addEventListener('keydown', (event) => {
-    if (event.key === 'Enter' && event.ctrlKey) {
-        event.preventDefault();
-        sendRawChatString();
-    }
-});
+function closeSettingsModal() {
+  settingsModal.style.display = 'none';
+  // Re-enable scrolling
+  document.body.style.overflow = 'auto';
+}
 
 // Listen for model status updates
 const unlistenModelStatus = window.electronAPI.onModelStatus((data) => {
