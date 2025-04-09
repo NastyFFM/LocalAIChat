@@ -289,7 +289,7 @@ async function initializeModel(customModelPath = null) {
         console.log("Import successful, node-llama-cpp module loaded");
         
         console.log("Getting llama interface with debug enabled");
-        const llama = await getLlama({
+        const llama = await getLlama("lastBuild", {
             debug: true,
             logLevel: 'debug'
         });
