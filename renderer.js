@@ -626,7 +626,14 @@ async function sendMessage() {
       // If the response is complete, update chat history
       if (data.isComplete) {
         removeStreamingListener();
-        chatHistory.push({ user: message, assistant: data.token });
+        
+        // Clean the response by removing any "model" prefix before storing in history
+        let cleanResponse = data.token;
+        if (cleanResponse.startsWith('model')) {
+          cleanResponse = cleanResponse.replace(/^model\s*\n*/, '');
+        }
+        
+        chatHistory.push({ user: message, assistant: cleanResponse });
         
         // Save current chat
         saveCurrentChat();

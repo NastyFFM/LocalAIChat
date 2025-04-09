@@ -421,21 +421,8 @@ async function processChatMessage(message, history, params = null) {
     console.log('Using model parameters:', modelParams);
 
     try {
-        // Format messages using Gemma 3's specific format with predefined system prompt
-        let prompt = '<bos>';
-        
-        // Add predefined initial conversation
-        prompt += `<start_of_turn>user
-You are a clear, empathetic, and solution-oriented assistant. Your job is to help me directly and effectively – emotionally, socially, technically, creatively, or organizationally. You ask the right questions, think ahead, and give honest, practical answers. When things feel messy, you bring focus and structure. No fluff, no detours.
-
-I talk to you when I want clarity, momentum, or to do things right.
-
-Right now, there's a lot going on – I want to figure out what matters most.<end_of_turn>`;
-        
-        prompt += `<start_of_turn>model
-Got it. Let's bring some clarity.
-
-What's the first thing that comes to mind? We'll start there.<end_of_turn>`;
+        // Format the prompt exactly as specified by the user
+        let prompt = '<bos><start_of_turn>user\nYou are a clear, empathetic, and solution-oriented assistant. Your job is to help me directly and effectively – emotionally, socially, technically, creatively, or organizationally. You ask the right questions, think ahead, and give honest, practical answers. When things feel messy, you bring focus and structure. No fluff, no detours.\n\nI talk to you when I want clarity, momentum, or to do things right.\n\nRight now, there\'s a lot going on – I want to figure out what matters most.\n<end_of_turn><start_of_turn>model\nGot it. Let\'s bring some clarity.\n\nWhat\'s the first thing that comes to mind? We\'ll start there.\n<end_of_turn>';
         
         // Add conversation history
         if (history && history.length > 0) {
@@ -447,9 +434,7 @@ What's the first thing that comes to mind? We'll start there.<end_of_turn>`;
 
         // Add current message
         prompt += `<start_of_turn>user\n${message}<end_of_turn>`;
-        // Add model turn to indicate it's the model's turn to respond
-        prompt += `<start_of_turn>model\n`;
-
+        
         // Create context and get sequence
         const context = await model.createContext({
             temperature: modelParams.temperature,
@@ -482,6 +467,11 @@ What's the first thing that comes to mind? We'll start there.<end_of_turn>`;
         };
 
         for await (const token of sequence.evaluate(tokens)) {
+            // Make sure model is still available (in case of model switching)
+            if (!model) {
+                throw new Error('Model was unloaded during processing');
+            }
+            
             const tokenText = model.detokenize([token]);
             response += tokenText;
             
@@ -504,6 +494,30 @@ What's the first thing that comes to mind? We'll start there.<end_of_turn>`;
             modelParams.stop_sequence !== '<end_of_turn>') {
             response = response.replace(new RegExp(modelParams.stop_sequence + '.*$'), '').trim();
         }
+        
+        // Remove 'model' prefix if it exists at the beginning of the response
+        if (response.startsWith('model')) {
+            response = response.replace(/^model\s*\n*/, '');
+        }
+        
+        // Remove repeated user input patterns from the response
+        // Sometimes the model echoes back the user input multiple times
+        if (message && response.includes(message)) {
+            // Create a regex that escapes special characters in the message
+            const escapedMessage = message.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            // Create a pattern that matches the message, possibly repeated with formatting
+            const pattern = new RegExp(`(\\*\\*Date:\\*\\*)?${escapedMessage}`, 'g');
+            response = response.replace(pattern, '');
+        }
+
+        // Clean up any patterns like "🗓️ **Date:**" that might be duplicated
+        response = response.replace(/(🗓️\s*\*\*Date:\*\*)\s*🗓️\s*\*\*Date:\*\*/g, '$1');
+        
+        // Final cleanup of any remaining artifacts
+        response = response.replace(/🗓️\s*\*\*schreibe mir eine Einladung zum[^*]*\*\*/g, '🗓️ **Date:**');
+        
+        // Trim any excessive whitespace
+        response = response.trim();
 
         // Log the AI's response
         console.log('AI Response:', response);
@@ -580,6 +594,11 @@ async function processRawChatString(rawString, params = null) {
         };
 
         for await (const token of sequence.evaluate(tokens)) {
+            // Make sure model is still available (in case of model switching)
+            if (!model) {
+                throw new Error('Model was unloaded during processing');
+            }
+            
             const tokenText = model.detokenize([token]);
             response += tokenText;
             
@@ -602,6 +621,30 @@ async function processRawChatString(rawString, params = null) {
             modelParams.stop_sequence !== '<end_of_turn>') {
             response = response.replace(new RegExp(modelParams.stop_sequence + '.*$'), '').trim();
         }
+        
+        // Remove 'model' prefix if it exists at the beginning of the response
+        if (response.startsWith('model')) {
+            response = response.replace(/^model\s*\n*/, '');
+        }
+        
+        // Remove repeated user input patterns from the response
+        // Sometimes the model echoes back the user input multiple times
+        if (message && response.includes(message)) {
+            // Create a regex that escapes special characters in the message
+            const escapedMessage = message.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            // Create a pattern that matches the message, possibly repeated with formatting
+            const pattern = new RegExp(`(\\*\\*Date:\\*\\*)?${escapedMessage}`, 'g');
+            response = response.replace(pattern, '');
+        }
+
+        // Clean up any patterns like "🗓️ **Date:**" that might be duplicated
+        response = response.replace(/(🗓️\s*\*\*Date:\*\*)\s*🗓️\s*\*\*Date:\*\*/g, '$1');
+        
+        // Final cleanup of any remaining artifacts
+        response = response.replace(/🗓️\s*\*\*schreibe mir eine Einladung zum[^*]*\*\*/g, '🗓️ **Date:**');
+        
+        // Trim any excessive whitespace
+        response = response.trim();
 
         // Log the AI's response
         console.log('AI Response:', response);
