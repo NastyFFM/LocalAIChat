@@ -232,7 +232,114 @@
     .hidden {
       display: none;
     }
+    
+    .message-content {
+      padding: 12px;
+      border-radius: 12px;
+      max-width: 80%;
+      word-wrap: break-word;
+    }
+    
+    /* Markdown formatting styles */
+    .markdown-content {
+      line-height: 1.5;
+    }
+    
+    .markdown-content h1,
+    .markdown-content h2,
+    .markdown-content h3,
+    .markdown-content h4,
+    .markdown-content h5,
+    .markdown-content h6 {
+      margin-top: 1em;
+      margin-bottom: 0.5em;
+      font-weight: 600;
+    }
+    
+    .markdown-content h1 { font-size: 1.5em; }
+    .markdown-content h2 { font-size: 1.3em; }
+    .markdown-content h3 { font-size: 1.2em; }
+    
+    .markdown-content p {
+      margin-bottom: 0.75em;
+    }
+    
+    .markdown-content strong {
+      font-weight: 600;
+    }
+    
+    .markdown-content em {
+      font-style: italic;
+    }
+    
+    .markdown-content ul, 
+    .markdown-content ol {
+      margin-left: 1.5em;
+      margin-bottom: 0.75em;
+    }
+    
+    .markdown-content li {
+      margin-bottom: 0.25em;
+    }
+    
+    .markdown-content code {
+      font-family: 'Courier New', monospace;
+      background-color: rgba(0, 0, 0, 0.05);
+      padding: 0.2em 0.4em;
+      border-radius: 3px;
+      font-size: 0.9em;
+    }
+    
+    .markdown-content pre {
+      background-color: rgba(0, 0, 0, 0.05);
+      padding: 0.5em;
+      border-radius: 5px;
+      overflow-x: auto;
+      margin-bottom: 0.75em;
+    }
+    
+    .markdown-content pre code {
+      background-color: transparent;
+      padding: 0;
+    }
+    
+    .markdown-content blockquote {
+      border-left: 4px solid #ddd;
+      padding-left: 1em;
+      color: #666;
+      margin-bottom: 0.75em;
+    }
+    
+    .markdown-content a {
+      color: #0366d6;
+      text-decoration: none;
+    }
+    
+    .markdown-content a:hover {
+      text-decoration: underline;
+    }
+    
+    .markdown-content table {
+      border-collapse: collapse;
+      margin-bottom: 0.75em;
+      width: 100%;
+    }
+    
+    .markdown-content th,
+    .markdown-content td {
+      border: 1px solid #ddd;
+      padding: 6px 12px;
+      text-align: left;
+    }
+    
+    .markdown-content th {
+      background-color: rgba(0, 0, 0, 0.05);
+      font-weight: 600;
+    }
   </style>
+  <script src="renderer.js" defer></script>
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/dompurify@2.4.0/dist/purify.min.js"></script>
 </head>
 <body>
   <div class="app-container">
@@ -301,7 +408,5 @@
       </div>
     </div>
   </div>
-
-  <script src="renderer.js"></script>
 </body>
 </html> 

@@ -88,6 +88,25 @@ function loadSavedParameters() {
 // Initialize parameters
 loadSavedParameters();
 
+// Configure marked.js
+marked.setOptions({
+  breaks: true,          // Interpret line breaks as <br>
+  gfm: true,             // Use GitHub Flavored Markdown
+  headerIds: false,      // Don't add IDs to headers (for security)
+  mangle: false,         // Don't mangle email addresses
+  sanitize: false,       // We'll use DOMPurify for sanitization
+  smartLists: true,      // Use smarter list behavior
+  smartypants: true,     // Use "smart" typographic punctuation
+  xhtml: false           // Don't close empty tags with a slash
+});
+
+// Process markdown and sanitize the result
+function processMarkdown(text) {
+  if (!text) return '';
+  const rawHtml = marked.parse(text);
+  return DOMPurify.sanitize(rawHtml);
+}
+
 // Chat history
 let chatHistory = [];
 
@@ -150,6 +169,39 @@ function showChatInterface() {
   messageInput.focus();
 }
 
+// Add message to chat
+function addMessageToChat(message, sender) {
+  const messageDiv = document.createElement('div');
+  messageDiv.className = `message ${sender}-message`;
+  
+  const messageContent = document.createElement('div');
+  messageContent.className = 'message-content';
+  
+  // Handle message content differently based on sender
+  if (sender === 'user') {
+    // For user messages, just use text
+    messageContent.textContent = message;
+  } else {
+    // For assistant messages, enable markdown with sanitization
+    messageContent.innerHTML = processMarkdown(message);
+    // Add markdown-content class for styling
+    messageContent.classList.add('markdown-content');
+  }
+  
+  messageDiv.appendChild(messageContent);
+  chatContainer.appendChild(messageDiv);
+  
+  // Generate a unique ID for the message
+  const messageId = `message-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+  messageDiv.id = messageId;
+  
+  // Scroll to bottom
+  chatContainer.scrollTop = chatContainer.scrollHeight;
+  
+  // Return the message ID for updating streaming content
+  return messageId;
+}
+
 // Handle message sending
 async function sendMessage() {
   const message = messageInput.value.trim();
@@ -175,13 +227,13 @@ async function sendMessage() {
       const assistantMessage = document.getElementById(assistantMessageId);
       if (assistantMessage) {
         if (data.isComplete) {
-          // For complete messages, just set the final text
-          assistantMessage.querySelector('.message-content').textContent = data.token;
+          // For complete messages, render the final markdown
+          assistantMessage.querySelector('.message-content').innerHTML = processMarkdown(data.token);
           responseText = data.token;
         } else {
-          // For streaming tokens, append to the existing text
+          // For streaming tokens, append to the text and convert to markdown
           responseText += data.token;
-          assistantMessage.querySelector('.message-content').textContent = responseText;
+          assistantMessage.querySelector('.message-content').innerHTML = processMarkdown(responseText);
         }
       }
       
@@ -205,29 +257,6 @@ async function sendMessage() {
     sendButton.disabled = false;
     messageInput.focus();
   }
-}
-
-// Add message to chat
-function addMessageToChat(message, sender) {
-  const messageDiv = document.createElement('div');
-  messageDiv.className = `message ${sender}-message`;
-  
-  const messageContent = document.createElement('div');
-  messageContent.className = 'message-content';
-  messageContent.textContent = message;
-  
-  messageDiv.appendChild(messageContent);
-  chatContainer.appendChild(messageDiv);
-  
-  // Generate a unique ID for the message
-  const messageId = `message-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-  messageDiv.id = messageId;
-  
-  // Scroll to bottom
-  chatContainer.scrollTop = chatContainer.scrollHeight;
-  
-  // Return the message ID for updating streaming content
-  return messageId;
 }
 
 // Download model
@@ -406,13 +435,13 @@ async function sendRawChatString() {
       const assistantMessage = document.getElementById(assistantMessageId);
       if (assistantMessage) {
         if (data.isComplete) {
-          // For complete messages, just set the final text
-          assistantMessage.querySelector('.message-content').textContent = data.token;
+          // For complete messages, render the final markdown
+          assistantMessage.querySelector('.message-content').innerHTML = processMarkdown(data.token);
           responseText = data.token;
         } else {
-          // For streaming tokens, append to the existing text
+          // For streaming tokens, append to the text and convert to markdown
           responseText += data.token;
-          assistantMessage.querySelector('.message-content').textContent = responseText;
+          assistantMessage.querySelector('.message-content').innerHTML = processMarkdown(responseText);
         }
       }
       
