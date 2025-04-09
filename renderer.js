@@ -20,6 +20,14 @@ const settingsButton = document.getElementById('settings-button');
 const settingsModal = document.getElementById('settings-modal');
 const closeModalButton = document.querySelector('.close-modal');
 
+// Chat history elements
+const newChatButton = document.getElementById('new-chat-button');
+const chatList = document.getElementById('chat-list');
+const deleteChatModal = document.getElementById('delete-chat-modal');
+const cancelDeleteButton = document.getElementById('cancel-delete-button');
+const confirmDeleteButton = document.getElementById('confirm-delete-button');
+const closeDeleteModalButton = document.querySelector('.close-delete-modal');
+
 // Sampling parameters
 const temperatureSlider = document.getElementById('temperature');
 const temperatureValue = document.getElementById('temperature-value');
@@ -239,6 +247,244 @@ setupEventListeners();
 // Chat history
 let chatHistory = [];
 
+// Chat history management
+let allChats = [];
+let currentChatId = null;
+let currentChatIndex = -1;
+
+// Load all chats from localStorage
+function loadAllChats() {
+  try {
+    const savedChats = localStorage.getItem('allChats');
+    if (savedChats) {
+      allChats = JSON.parse(savedChats);
+    }
+  } catch (error) {
+    console.error('Error loading chats:', error);
+    allChats = [];
+  }
+}
+
+// Save all chats to localStorage
+function saveAllChats() {
+  try {
+    localStorage.setItem('allChats', JSON.stringify(allChats));
+  } catch (error) {
+    console.error('Error saving chats:', error);
+  }
+}
+
+// Create a new chat
+function createNewChat() {
+  // Generate a unique ID for the chat
+  const chatId = Date.now().toString();
+  const newChat = {
+    id: chatId,
+    title: `Chat ${allChats.length + 1}`,
+    messages: [],
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  };
+  
+  allChats.push(newChat);
+  saveAllChats();
+  
+  // Set the current chat and update UI
+  setCurrentChat(chatId);
+  renderChatList();
+  
+  // Clear chat container
+  chatContainer.innerHTML = '';
+  chatHistory = [];
+}
+
+// Set the current chat
+function setCurrentChat(chatId) {
+  currentChatId = chatId;
+  currentChatIndex = allChats.findIndex(chat => chat.id === chatId);
+  
+  // Update chat list UI to show active chat
+  renderChatList();
+}
+
+// Render the chat list in the sidebar
+function renderChatList() {
+  chatList.innerHTML = '';
+  
+  allChats.forEach(chat => {
+    const chatItem = document.createElement('div');
+    chatItem.className = `chat-item ${chat.id === currentChatId ? 'active' : ''}`;
+    
+    const chatTitle = document.createElement('div');
+    chatTitle.className = 'chat-title';
+    chatTitle.textContent = chat.title;
+    
+    const chatButtons = document.createElement('div');
+    chatButtons.className = 'chat-item-buttons';
+    
+    const deleteButton = document.createElement('button');
+    deleteButton.className = 'delete-chat-button';
+    deleteButton.innerHTML = '🗑️';
+    deleteButton.title = 'Delete Chat';
+    deleteButton.onclick = (e) => {
+      e.stopPropagation();
+      openDeleteChatModal(chat.id);
+    };
+    
+    chatButtons.appendChild(deleteButton);
+    chatItem.appendChild(chatTitle);
+    chatItem.appendChild(chatButtons);
+    
+    // Open chat when clicked
+    chatItem.addEventListener('click', () => {
+      if (chat.id !== currentChatId) {
+        loadChat(chat.id);
+      }
+    });
+    
+    chatList.appendChild(chatItem);
+  });
+}
+
+// Load a specific chat
+function loadChat(chatId) {
+  const chatIndex = allChats.findIndex(chat => chat.id === chatId);
+  if (chatIndex === -1) return;
+  
+  const chat = allChats[chatIndex];
+  
+  // Set current chat
+  currentChatId = chatId;
+  currentChatIndex = chatIndex;
+  
+  // Clear chat container
+  chatContainer.innerHTML = '';
+  
+  // Load messages into chat container
+  chatHistory = chat.messages.map(msg => ({
+    user: msg.content,
+    assistant: msg.response
+  }));
+  
+  // Display messages
+  chat.messages.forEach(msg => {
+    addMessageToChat(msg.content, 'user');
+    if (msg.response) {
+      addMessageToChat(msg.response, 'assistant');
+    }
+  });
+  
+  // Update UI
+  renderChatList();
+}
+
+// Save current chat
+function saveCurrentChat() {
+  if (currentChatIndex === -1 || !currentChatId) return;
+  
+  allChats[currentChatIndex].messages = chatHistory.map(msg => ({
+    content: msg.user,
+    response: msg.assistant
+  }));
+  
+  allChats[currentChatIndex].updatedAt = new Date().toISOString();
+  
+  // Update title to first message if available
+  if (chatHistory.length > 0 && chatHistory[0].user) {
+    const title = chatHistory[0].user.substring(0, 30) + (chatHistory[0].user.length > 30 ? '...' : '');
+    allChats[currentChatIndex].title = title;
+  }
+  
+  saveAllChats();
+  renderChatList();
+}
+
+// Delete chat modal functions
+function openDeleteChatModal(chatId) {
+  // Store the chat ID to delete
+  confirmDeleteButton.dataset.chatId = chatId;
+  
+  // Show the modal
+  deleteChatModal.style.display = 'block';
+  // Prevent scrolling
+  document.body.style.overflow = 'hidden';
+}
+
+function closeDeleteChatModal() {
+  deleteChatModal.style.display = 'none';
+  // Re-enable scrolling
+  document.body.style.overflow = 'auto';
+  // Clear stored chat ID
+  confirmDeleteButton.dataset.chatId = '';
+}
+
+// Delete a chat
+function deleteChat(chatId) {
+  const chatIndex = allChats.findIndex(chat => chat.id === chatId);
+  if (chatIndex === -1) return;
+  
+  // Remove the chat
+  allChats.splice(chatIndex, 1);
+  saveAllChats();
+  
+  // If deleted the current chat, create a new one
+  if (chatId === currentChatId) {
+    // Clear current chat
+    currentChatId = null;
+    currentChatIndex = -1;
+    chatContainer.innerHTML = '';
+    chatHistory = [];
+    
+    // Create a new chat if there are no chats left
+    if (allChats.length === 0) {
+      createNewChat();
+    } else {
+      // Load the first available chat
+      loadChat(allChats[0].id);
+    }
+  }
+  
+  // Update UI
+  renderChatList();
+}
+
+// Setup additional event listeners for chat management
+function setupChatManagementEventListeners() {
+  // New chat button
+  if (newChatButton) {
+    newChatButton.addEventListener('click', createNewChat);
+  }
+  
+  // Delete chat modal
+  if (confirmDeleteButton) {
+    confirmDeleteButton.addEventListener('click', () => {
+      const chatId = confirmDeleteButton.dataset.chatId;
+      if (chatId) {
+        deleteChat(chatId);
+        closeDeleteChatModal();
+      }
+    });
+  }
+  
+  if (cancelDeleteButton) {
+    cancelDeleteButton.addEventListener('click', closeDeleteChatModal);
+  }
+  
+  if (closeDeleteModalButton) {
+    closeDeleteModalButton.addEventListener('click', closeDeleteChatModal);
+  }
+  
+  // Close delete modal when clicking outside
+  window.addEventListener('click', (event) => {
+    if (event.target === deleteChatModal) {
+      closeDeleteChatModal();
+    }
+  });
+}
+
+// Call setup function for chat management
+setupChatManagementEventListeners();
+
 // Check model status on startup
 async function checkModelStatus() {
   try {
@@ -295,6 +541,17 @@ function showChatInterface() {
   downloadSection.classList.add('hidden');
   chatInterface.classList.remove('hidden');
   sendButton.disabled = false;
+  
+  // Load chats or create a new one
+  loadAllChats();
+  
+  if (allChats.length === 0) {
+    createNewChat();
+  } else {
+    // Load the most recent chat
+    loadChat(allChats[allChats.length - 1].id);
+  }
+  
   messageInput.focus();
 }
 
@@ -370,6 +627,10 @@ async function sendMessage() {
       if (data.isComplete) {
         removeStreamingListener();
         chatHistory.push({ user: message, assistant: data.token });
+        
+        // Save current chat
+        saveCurrentChat();
+        
         messageInput.disabled = false;
         sendButton.disabled = false;
         messageInput.focus();
