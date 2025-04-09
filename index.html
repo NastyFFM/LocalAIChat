@@ -694,6 +694,51 @@
       font-size: 14px;
       font-weight: 500;
     }
+    
+    /* Search bar styling */
+    .search-container {
+      padding: 10px;
+      position: relative;
+      background-color: #f5f5f5;
+      border-bottom: 1px solid #dee2e6;
+    }
+    
+    .chat-search-input {
+      width: 100%;
+      padding: 8px 30px 8px 10px;
+      border: 1px solid #dee2e6;
+      border-radius: 4px;
+      font-size: 14px;
+      outline: none;
+    }
+    
+    .chat-search-input:focus {
+      border-color: #4a69bd;
+      box-shadow: 0 0 0 2px rgba(74, 105, 189, 0.2);
+    }
+    
+    .clear-search-button {
+      position: absolute;
+      right: 15px;
+      top: 50%;
+      transform: translateY(-50%);
+      background: none;
+      border: none;
+      color: #888;
+      font-size: 18px;
+      cursor: pointer;
+      padding: 0;
+      width: 20px;
+      height: 20px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      opacity: 0.7;
+    }
+    
+    .clear-search-button:hover {
+      opacity: 1;
+    }
   </style>
   <script src="renderer.js" defer></script>
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
@@ -713,6 +758,13 @@
           <h2>Chats</h2>
           <button id="new-chat-button" class="new-chat-button" title="New Chat">+</button>
         </div>
+        
+        <!-- Search bar for filtering chats -->
+        <div class="search-container">
+          <input type="text" id="chat-search" placeholder="Search chats..." class="chat-search-input">
+          <button id="clear-search" class="clear-search-button" title="Clear search">×</button>
+        </div>
+        
         <div id="chat-list" class="chat-list">
           <!-- Chat items will be added here dynamically -->
         </div>
