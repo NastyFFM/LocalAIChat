@@ -168,16 +168,21 @@ async function sendMessage() {
   try {
     // Create a placeholder for the assistant's response
     const assistantMessageId = addMessageToChat('', 'assistant');
-    let lastToken = '';
+    let responseText = '';
     
     // Set up streaming listener
     const removeStreamingListener = window.electronAPI.onStreamingToken((data) => {
       const assistantMessage = document.getElementById(assistantMessageId);
       if (assistantMessage) {
-        // Extract only the new part of the token
-        const newContent = data.token.slice(lastToken.length);
-        assistantMessage.querySelector('.message-content').textContent = data.token;
-        lastToken = data.token;
+        if (data.isComplete) {
+          // For complete messages, just set the final text
+          assistantMessage.querySelector('.message-content').textContent = data.token;
+          responseText = data.token;
+        } else {
+          // For streaming tokens, append to the existing text
+          responseText += data.token;
+          assistantMessage.querySelector('.message-content').textContent = responseText;
+        }
       }
       
       // If the response is complete, update chat history
@@ -394,16 +399,21 @@ async function sendRawChatString() {
   try {
     // Create a placeholder for the assistant's response
     const assistantMessageId = addMessageToChat('', 'assistant');
-    let lastToken = '';
+    let responseText = '';
     
     // Set up streaming listener
     const removeStreamingListener = window.electronAPI.onStreamingToken((data) => {
       const assistantMessage = document.getElementById(assistantMessageId);
       if (assistantMessage) {
-        // Extract only the new part of the token
-        const newContent = data.token.slice(lastToken.length);
-        assistantMessage.querySelector('.message-content').textContent = data.token;
-        lastToken = data.token;
+        if (data.isComplete) {
+          // For complete messages, just set the final text
+          assistantMessage.querySelector('.message-content').textContent = data.token;
+          responseText = data.token;
+        } else {
+          // For streaming tokens, append to the existing text
+          responseText += data.token;
+          assistantMessage.querySelector('.message-content').textContent = responseText;
+        }
       }
       
       // If the response is complete, update chat history

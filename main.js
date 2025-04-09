@@ -485,7 +485,7 @@ Was genau fühlt sich gerade am meisten nach "zu viel" an? Arbeit, Gedanken, Gef
             const tokenText = model.detokenize([token]);
             response += tokenText;
             
-            // Send token to renderer
+            // Send individual token to renderer
             mainWindow.webContents.send('streaming-token', {
                 token: tokenText,
                 isComplete: false
@@ -583,7 +583,7 @@ async function processRawChatString(rawString, params = null) {
             const tokenText = model.detokenize([token]);
             response += tokenText;
             
-            // Send token to renderer
+            // Send individual token to renderer
             mainWindow.webContents.send('streaming-token', {
                 token: tokenText,
                 isComplete: false
