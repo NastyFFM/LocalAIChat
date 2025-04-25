@@ -410,9 +410,12 @@ async function processChatMessage(message, history, params = null) {
 
     // Default parameters
     const defaultParams = {
-        temperature: 1.0,
-        top_p: 0.95,
-        max_length: 8192,
+        temperature: 0.1,           // Lower temperature for more deterministic output
+        top_p: 0.95,               // Nucleus sampling threshold
+        top_k: 64,                 // Limit to top 64 most likely tokens
+        repeat_penalty: 1.0,       // Penalty for repeated tokens
+        min_p: 0.01,               // Minimum probability for tokens
+        max_length: 8192,          // Maximum output length
         stop_sequence: '<end_of_turn>'
     };
 
@@ -421,19 +424,53 @@ async function processChatMessage(message, history, params = null) {
     console.log('Using model parameters:', modelParams);
 
     try {
-        // Format the prompt exactly as specified by the user
-        let prompt = '<bos><start_of_turn>user\nYou are a clear, empathetic, and solution-oriented assistant. Your job is to help me directly and effectively – emotionally, socially, technically, creatively, or organizationally. You ask the right questions, think ahead, and give honest, practical answers. When things feel messy, you bring focus and structure. No fluff, no detours.\n\nI talk to you when I want clarity, momentum, or to do things right.\n\nRight now, there\'s a lot going on – I want to figure out what matters most.\n<end_of_turn><start_of_turn>model\nGot it. Let\'s bring some clarity.\n\nWhat\'s the first thing that comes to mind? We\'ll start there.\n<end_of_turn>';
+        // Start with BOS token
+        let prompt = '<bos>';
         
-        // Add conversation history
+        // Add system prompt only if this is the first message
+        if (!history || history.length === 0) {
+            prompt += `<start_of_turn>user\nI am a helpful AI assistant focused on providing accurate, clear, and concise information. I aim to be direct while remaining friendly. I explain complex topics simply and acknowledge when I'm unsure. I follow best practices in coding and provide practical solutions with proper error handling. I maintain objectivity and respect in all interactions.
+
+Here are some example conversations to demonstrate my style:
+
+User: What is JavaScript?
+Assistant: JavaScript is a programming language used primarily for web development. It allows you to add interactivity to websites, create web applications, and build server-side applications using Node.js. It's one of the core technologies of the web alongside HTML and CSS.
+
+User: How do I create a function in JavaScript?
+Assistant: In JavaScript, you can create a function using the 'function' keyword or arrow syntax. Here's an example:
+\`\`\`javascript
+// Traditional function
+function greet(name) {
+    return \`Hello, \${name}!\`;
+}
+
+// Arrow function
+const greet = (name) => \`Hello, \${name}!\`;
+\`\`\`
+
+User: What's the difference between let and const?
+Assistant: 'let' and 'const' are both used to declare variables in JavaScript. The key differences are:
+- 'let' allows reassignment: \`let x = 1; x = 2;\` is valid
+- 'const' prevents reassignment: \`const x = 1; x = 2;\` will throw an error
+- Both are block-scoped, unlike 'var' which is function-scoped
+
+Please answer all questions in a concise and informative manner. Do not repeat yourself or include unnecessary text. Focus on providing clear, direct answers.<end_of_turn>`;
+        }
+
+        // Add chat history if available
         if (history && history.length > 0) {
-            for (const entry of history) {
-                prompt += `<start_of_turn>user\n${entry.user}<end_of_turn>`;
-                prompt += `<start_of_turn>model\n${entry.assistant}<end_of_turn>`;
-            }
+            history.forEach(msg => {
+                prompt += `<start_of_turn>${msg.role}\n${msg.content}<end_of_turn>`;
+            });
         }
 
         // Add current message
         prompt += `<start_of_turn>user\n${message}<end_of_turn>`;
+        
+        // Log the complete prompt before tokenization
+        console.log('\n=== PROMPT SENT TO AI ===');
+        console.log(prompt);
+        console.log('=== END PROMPT ===\n');
         
         // Create context and get sequence
         const context = await model.createContext({
@@ -489,23 +526,9 @@ async function processChatMessage(message, history, params = null) {
         // Clean up response by removing the end_of_turn token
         response = response.replace(/<end_of_turn>.*$/, '').trim();
         
-        // If custom stop sequence is used, remove it too
-        if (modelParams.stop_sequence && 
-            modelParams.stop_sequence !== '<end_of_turn>') {
-            response = response.replace(new RegExp(modelParams.stop_sequence + '.*$'), '').trim();
-        }
-        
-        // Remove 'model' prefix if it exists at the beginning of the response
-        if (response.startsWith('model')) {
-            response = response.replace(/^model\s*\n*/, '');
-        }
-        
         // Remove repeated user input patterns from the response
-        // Sometimes the model echoes back the user input multiple times
         if (message && response.includes(message)) {
-            // Create a regex that escapes special characters in the message
             const escapedMessage = message.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-            // Create a pattern that matches the message, possibly repeated with formatting
             const pattern = new RegExp(`(\\*\\*Date:\\*\\*)?${escapedMessage}`, 'g');
             response = response.replace(pattern, '');
         }
@@ -551,9 +574,12 @@ async function processRawChatString(rawString, params = null) {
 
     // Default parameters
     const defaultParams = {
-        temperature: 1.0,
-        top_p: 0.95,
-        max_length: 8192,
+        temperature: 0.1,           // Lower temperature for more deterministic output
+        top_p: 0.95,               // Nucleus sampling threshold
+        top_k: 64,                 // Limit to top 64 most likely tokens
+        repeat_penalty: 1.0,       // Penalty for repeated tokens
+        min_p: 0.01,               // Minimum probability for tokens
+        max_length: 8192,          // Maximum output length
         stop_sequence: '<end_of_turn>'
     };
 
@@ -616,23 +642,9 @@ async function processRawChatString(rawString, params = null) {
         // Clean up response by removing the end_of_turn token
         response = response.replace(/<end_of_turn>.*$/, '').trim();
         
-        // If custom stop sequence is used, remove it too
-        if (modelParams.stop_sequence && 
-            modelParams.stop_sequence !== '<end_of_turn>') {
-            response = response.replace(new RegExp(modelParams.stop_sequence + '.*$'), '').trim();
-        }
-        
-        // Remove 'model' prefix if it exists at the beginning of the response
-        if (response.startsWith('model')) {
-            response = response.replace(/^model\s*\n*/, '');
-        }
-        
         // Remove repeated user input patterns from the response
-        // Sometimes the model echoes back the user input multiple times
-        if (message && response.includes(message)) {
-            // Create a regex that escapes special characters in the message
-            const escapedMessage = message.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-            // Create a pattern that matches the message, possibly repeated with formatting
+        if (rawString && response.includes(rawString)) {
+            const escapedMessage = rawString.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
             const pattern = new RegExp(`(\\*\\*Date:\\*\\*)?${escapedMessage}`, 'g');
             response = response.replace(pattern, '');
         }
@@ -658,12 +670,10 @@ async function processRawChatString(rawString, params = null) {
         return response;
     } catch (error) {
         console.error('Error processing raw chat string:', error);
-        if (mainWindow) {
-            mainWindow.webContents.send('streaming-token', {
-                token: `Error: ${error.message}`,
-                isComplete: true
-            });
-        }
+        mainWindow.webContents.send('streaming-token', {
+            token: `Error: ${error.message}`,
+            isComplete: true
+        });
         throw error;
     }
 }
@@ -773,4 +783,4 @@ function setupIPCHandlers() {
   });
   
   console.log("IPC handlers setup complete");
-} 
+}

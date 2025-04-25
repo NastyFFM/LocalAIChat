@@ -256,7 +256,7 @@ let chatHistory = [];
 
 // Chat history management
 let allChats = [];
-let currentChatId = null;
+let currentChat = null;
 let currentChatIndex = -1;
 
 // Load all chats from localStorage
@@ -265,6 +265,11 @@ function loadAllChats() {
     const savedChats = localStorage.getItem('allChats');
     if (savedChats) {
       allChats = JSON.parse(savedChats);
+      // Set current chat to the most recent one if available
+      if (allChats.length > 0) {
+        currentChat = allChats[0];
+        currentChatIndex = 0;
+      }
     }
   } catch (error) {
     console.error('Error loading chats:', error);
@@ -308,7 +313,6 @@ function createNewChat() {
 
 // Set the current chat
 function setCurrentChat(chatId) {
-  currentChatId = chatId;
   currentChatIndex = allChats.findIndex(chat => chat.id === chatId);
   
   // Update chat list UI to show active chat
@@ -322,7 +326,7 @@ function renderChatList() {
   // No need to sort, as we're now adding new chats to the beginning of the array
   allChats.forEach(chat => {
     const chatItem = document.createElement('div');
-    chatItem.className = `chat-item ${chat.id === currentChatId ? 'active' : ''}`;
+    chatItem.className = `chat-item ${chat.id === currentChat.id ? 'active' : ''}`;
     
     const chatTitle = document.createElement('div');
     chatTitle.className = 'chat-title';
@@ -346,7 +350,7 @@ function renderChatList() {
     
     // Open chat when clicked
     chatItem.addEventListener('click', () => {
-      if (chat.id !== currentChatId) {
+      if (chat.id !== currentChat.id) {
         loadChat(chat.id);
       }
     });
@@ -363,7 +367,7 @@ function loadChat(chatId) {
   const chat = allChats[chatIndex];
   
   // Set current chat
-  currentChatId = chatId;
+  currentChat = chat;
   currentChatIndex = chatIndex;
   
   // Clear chat container
@@ -389,7 +393,7 @@ function loadChat(chatId) {
 
 // Save current chat
 function saveCurrentChat() {
-  if (currentChatIndex === -1 || !currentChatId) return;
+  if (currentChatIndex === -1 || !currentChat.id) return;
   
   allChats[currentChatIndex].messages = chatHistory.map(msg => ({
     content: msg.user,
@@ -437,9 +441,9 @@ function deleteChat(chatId) {
   saveAllChats();
   
   // If deleted the current chat, create a new one
-  if (chatId === currentChatId) {
+  if (chatId === currentChat.id) {
     // Clear current chat
-    currentChatId = null;
+    currentChat = null;
     currentChatIndex = -1;
     chatContainer.innerHTML = '';
     chatHistory = [];
@@ -617,6 +621,9 @@ async function sendMessage() {
     const assistantMessageId = addMessageToChat('', 'assistant');
     let responseText = '';
     
+    // Get the current chat history in the correct format
+    const history = currentChat ? currentChat.messages : [];
+    
     // Set up streaming listener
     const removeStreamingListener = window.electronAPI.onStreamingToken((data) => {
       const assistantMessage = document.getElementById(assistantMessageId);
@@ -642,7 +649,23 @@ async function sendMessage() {
           cleanResponse = cleanResponse.replace(/^model\s*\n*/, '');
         }
         
-        chatHistory.push({ user: message, assistant: cleanResponse });
+        // Update chat history in the correct format
+        if (!currentChat) {
+          currentChat = {
+            id: Date.now().toString(),
+            title: `Chat ${allChats.length + 1}`,
+            messages: [],
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString()
+          };
+          allChats.unshift(currentChat);
+        }
+        
+        // Add messages to history in the correct format
+        currentChat.messages.push(
+          { role: 'user', content: message },
+          { role: 'assistant', content: cleanResponse }
+        );
         
         // Save current chat
         saveCurrentChat();
@@ -653,12 +676,10 @@ async function sendMessage() {
       }
     });
     
-    // Send message to main process with parameters
-    await window.electronAPI.sendMessage(message, chatHistory, modelParams);
-    
+    // Send message to main process with correct history format
+    await window.electronAPI.sendMessage(message, history, modelParams);
   } catch (error) {
     console.error('Error sending message:', error);
-    updateStatus('error', 'Error sending message');
     messageInput.disabled = false;
     sendButton.disabled = false;
     messageInput.focus();
