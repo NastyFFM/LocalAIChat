@@ -762,34 +762,99 @@
             <div class="modal-content">
               <div class="modal-header">
                 <h2>Settings</h2>
-                <span class="close-modal">&times;</span>
+                <button class="close-button">&times;</button>
               </div>
               
               <div class="modal-body">
-                <div class="parameters-container">
-                  <h3>Sampling Parameters</h3>
+                <!-- Template Management Section -->
+                <div class="mb-6">
+                  <h3 class="text-lg font-semibold mb-4">Prompt Templates</h3>
                   
-                  <div class="parameter-group">
-                    <label for="temperature">Temperature: <span id="temperature-value">1.0</span></label>
-                    <input type="range" id="temperature" min="0" max="2" step="0.01" value="1.0">
+                  <!-- Template Selection -->
+                  <div class="mb-4">
+                    <label class="block text-sm font-medium text-gray-700 mb-2">Select Template</label>
+                    <select id="templateSelect" class="w-full p-2 border rounded">
+                      <option value="">Select a template</option>
+                    </select>
                   </div>
                   
-                  <div class="parameter-group">
-                    <label for="top-p">Top P: <span id="top-p-value">0.95</span></label>
-                    <input type="range" id="top-p" min="0" max="1" step="0.01" value="0.95">
+                  <!-- Template Form -->
+                  <div class="space-y-4">
+                    <div>
+                      <label class="block text-sm font-medium text-gray-700">Template Name</label>
+                      <input type="text" id="templateName" class="w-full p-2 border rounded" placeholder="Enter template name">
+                    </div>
+                    
+                    <div>
+                      <label class="block text-sm font-medium text-gray-700">Description</label>
+                      <input type="text" id="templateDescription" class="w-full p-2 border rounded" placeholder="Enter template description">
+                    </div>
+                    
+                    <div>
+                      <label class="block text-sm font-medium text-gray-700">System Prompt</label>
+                      <textarea id="systemPrompt" class="w-full p-2 border rounded" rows="4" placeholder="Enter system prompt"></textarea>
+                    </div>
+                    
+                    <!-- Parameter Sliders -->
+                    <div id="parametersContainer" class="space-y-4">
+                      <div class="space-y-2">
+                        <label class="block text-sm font-medium text-gray-700">Temperature</label>
+                        <div class="flex items-center space-x-2">
+                          <input type="range" id="temperatureSlider" min="0" max="2" step="0.1" value="1.0" class="flex-1">
+                          <span id="temperatureValue" class="text-sm text-gray-600">1.0</span>
+                        </div>
+                      </div>
+                      
+                      <div class="space-y-2">
+                        <label class="block text-sm font-medium text-gray-700">Min P</label>
+                        <div class="flex items-center space-x-2">
+                          <input type="range" id="minPSlider" min="0" max="1" step="0.01" value="0.01" class="flex-1">
+                          <span id="minPValue" class="text-sm text-gray-600">0.01</span>
+                        </div>
+                      </div>
+                      
+                      <div class="space-y-2">
+                        <label class="block text-sm font-medium text-gray-700">Repeat Penalty</label>
+                        <div class="flex items-center space-x-2">
+                          <input type="range" id="repeatPenaltySlider" min="0" max="2" step="0.1" value="1.0" class="flex-1">
+                          <span id="repeatPenaltyValue" class="text-sm text-gray-600">1.0</span>
+                        </div>
+                      </div>
+                      
+                      <div class="space-y-2">
+                        <label class="block text-sm font-medium text-gray-700">Top K</label>
+                        <div class="flex items-center space-x-2">
+                          <input type="range" id="topKSlider" min="0" max="100" step="1" value="64" class="flex-1">
+                          <span id="topKValue" class="text-sm text-gray-600">64</span>
+                        </div>
+                      </div>
+                      
+                      <div class="space-y-2">
+                        <label class="block text-sm font-medium text-gray-700">Top P</label>
+                        <div class="flex items-center space-x-2">
+                          <input type="range" id="topPSlider" min="0" max="1" step="0.01" value="0.95" class="flex-1">
+                          <span id="topPValue" class="text-sm text-gray-600">0.95</span>
+                        </div>
+                      </div>
+                      
+                      <div class="space-y-2">
+                        <label class="block text-sm font-medium text-gray-700">Max Tokens</label>
+                        <div class="flex items-center space-x-2">
+                          <input type="range" id="maxTokensSlider" min="1" max="32768" step="1" value="32768" class="flex-1">
+                          <span id="maxTokensValue" class="text-sm text-gray-600">32768</span>
+                        </div>
+                      </div>
+                    </div>
+                    
+                    <div class="flex space-x-2">
+                      <button id="saveTemplateButton" class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700">
+                        Save Template
+                      </button>
+                      <button id="deleteTemplateButton" class="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700">
+                        Delete Template
+                      </button>
+                    </div>
                   </div>
-                  
-                  <div class="parameter-group">
-                    <label for="max-length">Output Length:</label>
-                    <input type="number" id="max-length" value="8192" min="10" max="32768">
-                  </div>
-                  
-                  <div class="parameter-group">
-                    <label for="stop-sequence">Stop Sequence:</label>
-                    <input type="text" id="stop-sequence" placeholder="Add custom stop sequence">
-                  </div>
-                  
-                  <button id="apply-params-button">Apply Parameters</button>
                 </div>
                 
                 <div class="raw-chat-container">

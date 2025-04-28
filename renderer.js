@@ -44,6 +44,9 @@ const closeSettingsButton = document.getElementById('close-settings-button');
 const chatSearch = document.getElementById('chat-search');
 const clearSearchButton = document.getElementById('clear-search');
 
+// Template management
+let templates = [];
+
 // Validate DOM elements
 function validateDOMElements() {
   // Check that all required elements exist
@@ -71,67 +74,103 @@ function validateDOMElements() {
 // Call validation on page load
 validateDOMElements();
 
-// Default parameters
+// Model parameters with default values
 let modelParams = {
-  temperature: 1.0,
-  top_p: 0.95,
-  max_length: 8192,
-  stop_sequence: '<end_of_turn>'
+    temperature: 1.0,
+    min_p: 0.01,
+    repeat_penalty: 1.0,
+    top_k: 64,
+    top_p: 0.95,
+    num_predict: 32768,
+    stop: ["<end_of_turn>", "<eos>"]
 };
 
-// Update parameter display
-temperatureSlider.addEventListener('input', () => {
-  const value = parseFloat(temperatureSlider.value);
-  temperatureValue.textContent = value.toFixed(2);
-  modelParams.temperature = value;
-});
-
-topPSlider.addEventListener('input', () => {
-  const value = parseFloat(topPSlider.value);
-  topPValue.textContent = value.toFixed(2);
-  modelParams.top_p = value;
-});
-
-// Apply parameters
-applyParamsButton.addEventListener('click', () => {
-  modelParams.max_length = parseInt(maxLengthInput.value, 10);
-  modelParams.stop_sequence = stopSequenceInput.value || '<end_of_turn>';
-  
-  // Save to localStorage
-  localStorage.setItem('modelParams', JSON.stringify(modelParams));
-  
-  // Notify user
-  alert('Parameter wurden angewendet!');
-});
-
-// Load saved parameters from localStorage
-function loadSavedParameters() {
-  const savedParams = localStorage.getItem('modelParams');
-  if (savedParams) {
-    try {
-      const params = JSON.parse(savedParams);
-      modelParams = { ...modelParams, ...params };
-      
-      // Update UI
-      temperatureSlider.value = modelParams.temperature;
-      temperatureValue.textContent = modelParams.temperature.toFixed(2);
-      
-      topPSlider.value = modelParams.top_p;
-      topPValue.textContent = modelParams.top_p.toFixed(2);
-      
-      maxLengthInput.value = modelParams.max_length;
-      
-      if (modelParams.stop_sequence && modelParams.stop_sequence !== '<end_of_turn>') {
-        stopSequenceInput.value = modelParams.stop_sequence;
-      }
-    } catch (e) {
-      console.error('Error loading saved parameters:', e);
-    }
-  }
+// Initialize parameter sliders
+function initializeParameterSliders() {
+    // Temperature
+    const temperatureSlider = document.getElementById('temperatureSlider');
+    const temperatureValue = document.getElementById('temperatureValue');
+    temperatureSlider.value = modelParams.temperature;
+    temperatureValue.textContent = modelParams.temperature;
+    
+    temperatureSlider.addEventListener('input', () => {
+        temperatureValue.textContent = temperatureSlider.value;
+        modelParams.temperature = parseFloat(temperatureSlider.value);
+    });
+    
+    // Min P
+    const minPSlider = document.getElementById('minPSlider');
+    const minPValue = document.getElementById('minPValue');
+    minPSlider.value = modelParams.min_p;
+    minPValue.textContent = modelParams.min_p;
+    
+    minPSlider.addEventListener('input', () => {
+        minPValue.textContent = minPSlider.value;
+        modelParams.min_p = parseFloat(minPSlider.value);
+    });
+    
+    // Repeat Penalty
+    const repeatPenaltySlider = document.getElementById('repeatPenaltySlider');
+    const repeatPenaltyValue = document.getElementById('repeatPenaltyValue');
+    repeatPenaltySlider.value = modelParams.repeat_penalty;
+    repeatPenaltyValue.textContent = modelParams.repeat_penalty;
+    
+    repeatPenaltySlider.addEventListener('input', () => {
+        repeatPenaltyValue.textContent = repeatPenaltySlider.value;
+        modelParams.repeat_penalty = parseFloat(repeatPenaltySlider.value);
+    });
+    
+    // Top K
+    const topKSlider = document.getElementById('topKSlider');
+    const topKValue = document.getElementById('topKValue');
+    topKSlider.value = modelParams.top_k;
+    topKValue.textContent = modelParams.top_k;
+    
+    topKSlider.addEventListener('input', () => {
+        topKValue.textContent = topKSlider.value;
+        modelParams.top_k = parseInt(topKSlider.value);
+    });
+    
+    // Top P
+    const topPSlider = document.getElementById('topPSlider');
+    const topPValue = document.getElementById('topPValue');
+    topPSlider.value = modelParams.top_p;
+    topPValue.textContent = modelParams.top_p;
+    
+    topPSlider.addEventListener('input', () => {
+        topPValue.textContent = topPSlider.value;
+        modelParams.top_p = parseFloat(topPSlider.value);
+    });
+    
+    // Max Tokens
+    const maxTokensSlider = document.getElementById('maxTokensSlider');
+    const maxTokensValue = document.getElementById('maxTokensValue');
+    maxTokensSlider.value = modelParams.num_predict;
+    maxTokensValue.textContent = modelParams.num_predict;
+    
+    maxTokensSlider.addEventListener('input', () => {
+        maxTokensValue.textContent = maxTokensSlider.value;
+        modelParams.num_predict = parseInt(maxTokensSlider.value);
+    });
 }
 
-// Initialize parameters
-loadSavedParameters();
+// Initialize sliders when DOM is loaded
+document.addEventListener('DOMContentLoaded', () => {
+    initializeParameterSliders();
+    loadTemplates(); // Load templates from localStorage
+    updateTemplateList(); // Update the template dropdown
+    
+    // Add event listeners for template management
+    document.getElementById('saveTemplateButton').addEventListener('click', saveTemplate);
+    document.getElementById('deleteTemplateButton').addEventListener('click', deleteTemplate);
+    document.getElementById('templateSelect').addEventListener('change', (e) => {
+        if (e.target.value) {
+            loadTemplate(e.target.value);
+        }
+    });
+    
+    // ... existing initialization code ...
+});
 
 // Configure marked.js
 marked.setOptions({
@@ -984,6 +1023,126 @@ function filterChats(query) {
       item.style.display = 'none';
     }
   });
+}
+
+// Load templates from localStorage
+function loadTemplates() {
+    const savedTemplates = localStorage.getItem('templates');
+    if (savedTemplates) {
+        try {
+            templates = JSON.parse(savedTemplates);
+            updateTemplateList();
+        } catch (e) {
+            console.error('Error loading templates:', e);
+            templates = [];
+        }
+    }
+}
+
+// Save templates to localStorage
+function saveTemplates() {
+    localStorage.setItem('templates', JSON.stringify(templates));
+}
+
+// Update template list in dropdown
+function updateTemplateList() {
+    const templateSelect = document.getElementById('templateSelect');
+    templateSelect.innerHTML = '<option value="">Select a template</option>';
+    
+    templates.forEach(template => {
+        const option = document.createElement('option');
+        option.value = template.name;
+        option.textContent = `${template.name} - ${template.description}`;
+        templateSelect.appendChild(option);
+    });
+}
+
+// Save template
+function saveTemplate() {
+    const name = document.getElementById('templateName').value.trim();
+    const description = document.getElementById('templateDescription').value.trim();
+    const prompt = document.getElementById('systemPrompt').value.trim();
+    
+    if (!name || !description || !prompt) {
+        showToast('Please fill in all fields', 'error');
+        return;
+    }
+    
+    const template = {
+        name,
+        description,
+        prompt,
+        parameters: { ...modelParams }
+    };
+    
+    const existingIndex = templates.findIndex(t => t.name === name);
+    if (existingIndex >= 0) {
+        if (confirm(`Template "${name}" already exists. Do you want to update it?`)) {
+            templates[existingIndex] = template;
+        }
+    } else {
+        templates.push(template);
+    }
+    
+    saveTemplates();
+    updateTemplateList();
+    showToast('Template saved successfully', 'success');
+}
+
+// Load template
+function loadTemplate(templateName) {
+    const template = templates.find(t => t.name === templateName);
+    if (template) {
+        document.getElementById('templateName').value = template.name;
+        document.getElementById('templateDescription').value = template.description;
+        document.getElementById('systemPrompt').value = template.prompt;
+        
+        // Update model parameters
+        modelParams = { ...template.parameters };
+        
+        // Update UI sliders
+        document.getElementById('temperatureSlider').value = modelParams.temperature;
+        document.getElementById('temperatureValue').textContent = modelParams.temperature;
+        
+        document.getElementById('minPSlider').value = modelParams.min_p;
+        document.getElementById('minPValue').textContent = modelParams.min_p;
+        
+        document.getElementById('repeatPenaltySlider').value = modelParams.repeat_penalty;
+        document.getElementById('repeatPenaltyValue').textContent = modelParams.repeat_penalty;
+        
+        document.getElementById('topKSlider').value = modelParams.top_k;
+        document.getElementById('topKValue').textContent = modelParams.top_k;
+        
+        document.getElementById('topPSlider').value = modelParams.top_p;
+        document.getElementById('topPValue').textContent = modelParams.top_p;
+        
+        document.getElementById('maxTokensSlider').value = modelParams.num_predict;
+        document.getElementById('maxTokensValue').textContent = modelParams.num_predict;
+        
+        showToast('Template loaded successfully', 'success');
+    }
+}
+
+// Delete template
+function deleteTemplate() {
+    const name = document.getElementById('templateName').value.trim();
+    if (!name) {
+        showToast('Please select a template to delete', 'error');
+        return;
+    }
+    
+    if (confirm(`Are you sure you want to delete template "${name}"?`)) {
+        templates = templates.filter(t => t.name !== name);
+        saveTemplates();
+        updateTemplateList();
+        
+        // Clear form
+        document.getElementById('templateName').value = '';
+        document.getElementById('templateDescription').value = '';
+        document.getElementById('systemPrompt').value = '';
+        
+        showToast('Template deleted successfully', 'success');
+    }
 }
 
 // Add initializeSearch to existing event listeners
