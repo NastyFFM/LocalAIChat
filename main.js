@@ -402,164 +402,131 @@ async function ensureModelExists() {
   }
 }
 
-// Process chat message
-async function processChatMessage(message, history, params = null) {
-    if (!model) {
-        throw new Error('Model not initialized');
-    }
-
-    // Default parameters
-    const defaultParams = {
-        temperature: 0.1,           // Lower temperature for more deterministic output
-        top_p: 0.95,               // Nucleus sampling threshold
-        top_k: 64,                 // Limit to top 64 most likely tokens
-        repeat_penalty: 1.0,       // Penalty for repeated tokens
-        min_p: 0.01,               // Minimum probability for tokens
-        max_length: 8192,          // Maximum output length
-        stop_sequence: '<end_of_turn>'
-    };
-
-    // Merge with provided parameters
-    const modelParams = { ...defaultParams, ...(params || {}) };
-    console.log('Using model parameters:', modelParams);
-
-    try {
-        // Start with BOS token
-        let prompt = '<bos>';
-        
-        // Add system prompt only if this is the first message
-        if (!history || history.length === 0) {
-            prompt += `<start_of_turn>user\nI am a helpful AI assistant focused on providing accurate, clear, and concise information. I aim to be direct while remaining friendly. I explain complex topics simply and acknowledge when I'm unsure. I follow best practices in coding and provide practical solutions with proper error handling. I maintain objectivity and respect in all interactions.
-
-Here are some example conversations to demonstrate my style:
-
-User: What is JavaScript?
-Assistant: JavaScript is a programming language used primarily for web development. It allows you to add interactivity to websites, create web applications, and build server-side applications using Node.js. It's one of the core technologies of the web alongside HTML and CSS.
-
-User: How do I create a function in JavaScript?
-Assistant: In JavaScript, you can create a function using the 'function' keyword or arrow syntax. Here's an example:
-\`\`\`javascript
-// Traditional function
-function greet(name) {
-    return \`Hello, \${name}!\`;
+// Add this function to load the system prompt
+function loadSystemPrompt() {
+  const customPrompt = store.get('systemPrompt');
+  if (customPrompt) {
+    return customPrompt;
+  }
+  return `I am a helpful AI assistant focused on providing accurate, clear, and concise information. I aim to be direct while remaining friendly. I explain complex topics simply and acknowledge when I'm unsure. I follow best practices in coding and provide practical solutions with proper error handling. I maintain objectivity and respect in all interactions.`;
 }
 
-// Arrow function
-const greet = (name) => \`Hello, \${name}!\`;
-\`\`\`
+// Update the processChatMessage function
+async function processChatMessage(message, params = {}) {
+  if (!model) {
+    console.error('Model not initialized');
+    return;
+  }
 
-User: What's the difference between let and const?
-Assistant: 'let' and 'const' are both used to declare variables in JavaScript. The key differences are:
-- 'let' allows reassignment: \`let x = 1; x = 2;\` is valid
-- 'const' prevents reassignment: \`const x = 1; x = 2;\` will throw an error
-- Both are block-scoped, unlike 'var' which is function-scoped
+  // Merge default parameters with provided ones
+  const modelParams = {
+    temperature: 0.7,
+    top_p: 0.9,
+    max_length: 2048,
+    stop_sequence: ['<end_of_turn>'],
+    repeat_penalty: 1.5,
+    frequency_penalty: 0.2,
+    ...params
+  };
 
-Please answer all questions in a concise and informative manner. Do not repeat yourself or include unnecessary text. Focus on providing clear, direct answers.<end_of_turn>`;
-        }
+  // Get the current chat history
+  const history = currentChat ? currentChat.messages : [];
+  
+  // Get the selected prompt from the chat history
+  const selectedPrompt = history.length > 0 ? history[0].prompt : null;
+  
+  // Format the prompt
+  let prompt = '';
+  if (history.length === 0) {
+    // First message - use the selected prompt or default
+    prompt = selectedPrompt || defaultSystemPrompt;
+    prompt = prompt.replace('{message}', message);
+  } else {
+    // Subsequent messages - use chat history
+    prompt = formatChatHistory(history, message);
+  }
 
-        // Add chat history if available
-        if (history && history.length > 0) {
-            history.forEach(msg => {
-                prompt += `<start_of_turn>${msg.role}\n${msg.content}<end_of_turn>`;
-            });
-        }
+  console.log('Complete prompt before tokenization:', prompt);
 
-        // Add current message
-        prompt += `<start_of_turn>user\n${message}<end_of_turn>`;
-        
-        // Log the complete prompt before tokenization
-        console.log('\n=== PROMPT SENT TO AI ===');
-        console.log(prompt);
-        console.log('=== END PROMPT ===\n');
-        
-        // Create context and get sequence
-        const context = await model.createContext({
-            temperature: modelParams.temperature,
-            top_p: modelParams.top_p
-        });
-        const sequence = context.getSequence();
+  // Log the complete prompt before tokenization
+  console.log('\n=== PROMPT SENT TO AI ===');
+  console.log(prompt);
+  console.log('=== END PROMPT ===\n');
 
-        // Tokenize the prompt
-        const tokens = model.tokenize(prompt);
-        console.log('Tokenized prompt length:', tokens.length);
+  // Create context and get sequence
+  const context = await model.createContext({
+    temperature: modelParams.temperature,
+    top_p: modelParams.top_p
+  });
+  const sequence = context.getSequence();
 
-        // Generate response
-        let response = '';
-        const stopCondition = (text) => {
-            // Stop on end_of_turn token
-            if (text.includes('<end_of_turn>')) {
-                return true;
-            }
-            // Stop on custom stop sequence
-            if (modelParams.stop_sequence && 
-                modelParams.stop_sequence !== '<end_of_turn>' && 
-                text.includes(modelParams.stop_sequence)) {
-                return true;
-            }
-            // Stop on max length
-            if (response.length > modelParams.max_length) {
-                return true;
-            }
-            return false;
-        };
+  // Tokenize the prompt
+  const tokens = model.tokenize(prompt);
+  console.log('Tokenized prompt length:', tokens.length);
 
-        for await (const token of sequence.evaluate(tokens)) {
-            // Make sure model is still available (in case of model switching)
-            if (!model) {
-                throw new Error('Model was unloaded during processing');
-            }
-            
-            const tokenText = model.detokenize([token]);
-            response += tokenText;
-            
-            // Send individual token to renderer
-            mainWindow.webContents.send('streaming-token', {
-                token: tokenText,
-                isComplete: false
-            });
-
-            if (stopCondition(response)) {
-                break;
-            }
-        }
-
-        // Clean up response by removing the end_of_turn token
-        response = response.replace(/<end_of_turn>.*$/, '').trim();
-        
-        // Remove repeated user input patterns from the response
-        if (message && response.includes(message)) {
-            const escapedMessage = message.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-            const pattern = new RegExp(`(\\*\\*Date:\\*\\*)?${escapedMessage}`, 'g');
-            response = response.replace(pattern, '');
-        }
-
-        // Clean up any patterns like "🗓️ **Date:**" that might be duplicated
-        response = response.replace(/(🗓️\s*\*\*Date:\*\*)\s*🗓️\s*\*\*Date:\*\*/g, '$1');
-        
-        // Final cleanup of any remaining artifacts
-        response = response.replace(/🗓️\s*\*\*schreibe mir eine Einladung zum[^*]*\*\*/g, '🗓️ **Date:**');
-        
-        // Trim any excessive whitespace
-        response = response.trim();
-
-        // Log the AI's response
-        console.log('AI Response:', response);
-
-        // Send final complete response
-        mainWindow.webContents.send('streaming-token', {
-            token: response,
-            isComplete: true
-        });
-
-        return response;
-    } catch (error) {
-        console.error('Error processing chat message:', error);
-        mainWindow.webContents.send('streaming-token', {
-            token: `Error: ${error.message}`,
-            isComplete: true
-        });
-        throw error;
+  // Generate response
+  let response = '';
+  const stopCondition = (text) => {
+    // Stop on end_of_turn token
+    if (text.includes('<end_of_turn>')) {
+      return true;
     }
+    // Stop on custom stop sequence
+    if (modelParams.stop_sequence && text.includes(modelParams.stop_sequence)) {
+      return true;
+    }
+    return false;
+  };
+
+  for await (const token of sequence.evaluate(tokens)) {
+    // Make sure model is still available (in case of model switching)
+    if (!model) {
+      throw new Error('Model was unloaded during processing');
+    }
+    
+    const tokenText = model.detokenize([token]);
+    response += tokenText;
+    
+    // Send individual token to renderer
+    mainWindow.webContents.send('streaming-token', {
+      token: tokenText,
+      isComplete: false
+    });
+
+    if (stopCondition(response)) {
+      break;
+    }
+  }
+
+  // Clean up response by removing the end_of_turn token
+  response = response.replace(/<end_of_turn>.*$/, '').trim();
+  
+  // Remove repeated user input patterns from the response
+  if (message && response.includes(message)) {
+    const escapedMessage = message.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const pattern = new RegExp(`(\\*\\*Date:\\*\\*)?${escapedMessage}`, 'g');
+    response = response.replace(pattern, '');
+  }
+
+  // Clean up any patterns like "🗓️ **Date:**" that might be duplicated
+  response = response.replace(/(🗓️\s*\*\*Date:\*\*)\s*🗓️\s*\*\*Date:\*\*/g, '$1');
+  
+  // Final cleanup of any remaining artifacts
+  response = response.replace(/🗓️\s*\*\*schreibe mir eine Einladung zum[^*]*\*\*/g, '🗓️ **Date:**');
+  
+  // Trim any excessive whitespace
+  response = response.trim();
+
+  // Log the AI's response
+  console.log('AI Response:', response);
+
+  // Send final complete response
+  mainWindow.webContents.send('streaming-token', {
+    token: response,
+    isComplete: true
+  });
+
+  return response;
 }
 
 // Process raw chat string
@@ -780,6 +747,22 @@ function setupIPCHandlers() {
       console.error("IPC: raw-chat-string error:", error);
       return { success: false, error: error.message };
     }
+  });
+  
+  // Add handler for system prompt updates
+  ipcMain.handle('update-system-prompt', (event, newPrompt) => {
+    try {
+      store.set('systemPrompt', newPrompt);
+      return { success: true };
+    } catch (error) {
+      console.error('Error saving system prompt:', error);
+      return { success: false, error: error.message };
+    }
+  });
+
+  // Add handler for getting current system prompt
+  ipcMain.handle('get-system-prompt', () => {
+    return loadSystemPrompt();
   });
   
   console.log("IPC handlers setup complete");

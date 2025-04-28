@@ -762,12 +762,40 @@
             <div class="modal-content">
               <div class="modal-header">
                 <h2>Settings</h2>
-                <span class="close-modal">&times;</span>
+                <button class="close-button">&times;</button>
               </div>
               
               <div class="modal-body">
-                <div class="parameters-container">
-                  <h3>Sampling Parameters</h3>
+                <div class="settings-section">
+                  <h3 class="text-lg font-semibold mb-2">System Prompt</h3>
+                  <div class="mb-4">
+                    <label class="block text-sm font-medium mb-1">Select Prompt</label>
+                    <select id="promptSelect" class="w-full p-2 border rounded bg-gray-800 text-white">
+                      <option value="">Select a prompt</option>
+                    </select>
+                  </div>
+                  <div class="mb-4">
+                    <label class="block text-sm font-medium mb-1">Prompt Name</label>
+                    <input type="text" id="promptName" class="w-full p-2 border rounded bg-gray-800 text-white" placeholder="Enter prompt name">
+                  </div>
+                  <div class="mb-4">
+                    <label class="block text-sm font-medium mb-1">Prompt Content</label>
+                    <textarea id="systemPrompt" class="w-full p-2 border rounded bg-gray-800 text-white h-32" placeholder="Enter system prompt"></textarea>
+                  </div>
+                  <div class="flex space-x-2">
+                    <button onclick="savePrompt()" class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700">Save Prompt</button>
+                    <button onclick="resetPrompt()" class="px-4 py-2 bg-gray-600 text-white rounded hover:bg-gray-700">Reset to Default</button>
+                  </div>
+                </div>
+                <div class="settings-section">
+                  <h3>Saved Prompts</h3>
+                  <div class="saved-prompts">
+                    <div id="saved-prompts-list"></div>
+                    <button id="new-prompt-template" class="btn">New Template</button>
+                  </div>
+                </div>
+                <div class="settings-section">
+                  <h3>Model Parameters</h3>
                   
                   <div class="parameter-group">
                     <label for="temperature">Temperature: <span id="temperature-value">1.0</span></label>

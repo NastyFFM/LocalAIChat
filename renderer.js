@@ -133,6 +133,70 @@ function loadSavedParameters() {
 // Initialize parameters
 loadSavedParameters();
 
+// Default system prompt
+const defaultSystemPrompt = `I am a helpful AI assistant focused on providing accurate, clear, and concise information. I aim to be direct while remaining friendly. I explain complex topics simply and acknowledge when I'm unsure. I follow best practices in coding and provide practical solutions with proper error handling. I maintain objectivity and respect in all interactions.
+
+Here are some example conversations to demonstrate my style:
+
+User: What is JavaScript?
+Assistant: JavaScript is a programming language used primarily for web development. It allows you to add interactivity to websites, create web applications, and build server-side applications using Node.js. It's one of the core technologies of the web alongside HTML and CSS.
+
+User: How do I create a function in JavaScript?
+Assistant: In JavaScript, you can create a function using the 'function' keyword or arrow syntax. Here's an example:
+\`\`\`javascript
+// Traditional function
+function greet(name) {
+    return \`Hello, \${name}!\`;
+}
+
+// Arrow function
+const greet = (name) => \`Hello, \${name}!\`;
+\`\`\`
+
+User: What's the difference between let and const?
+Assistant: 'let' and 'const' are both used to declare variables in JavaScript. The key differences are:
+- 'let' allows reassignment: \`let x = 1; x = 2;\` is valid
+- 'const' prevents reassignment: \`const x = 1; x = 2;\` will throw an error
+- Both are block-scoped, unlike 'var' which is function-scoped
+
+Please answer all questions in a concise and informative manner. Do not repeat yourself or include unnecessary text. Focus on providing clear, direct answers.`;
+
+// Update the system prompt functions
+async function saveSystemPrompt(prompt) {
+  try {
+    const result = await window.electron.ipcRenderer.invoke('update-system-prompt', prompt);
+    if (result.success) {
+      localStorage.setItem('systemPrompt', prompt);
+      return true;
+    }
+    throw new Error(result.error);
+  } catch (error) {
+    console.error('Error saving system prompt:', error);
+    return false;
+  }
+}
+
+async function loadSystemPrompt() {
+  try {
+    // First try to get from localStorage
+    const localPrompt = localStorage.getItem('systemPrompt');
+    if (localPrompt) return localPrompt;
+
+    // If not in localStorage, get from main process
+    const mainPrompt = await window.electron.ipcRenderer.invoke('get-system-prompt');
+    if (mainPrompt) {
+      localStorage.setItem('systemPrompt', mainPrompt);
+      return mainPrompt;
+    }
+
+    // If all else fails, return default
+    return defaultSystemPrompt;
+  } catch (error) {
+    console.error('Error loading system prompt:', error);
+    return defaultSystemPrompt;
+  }
+}
+
 // Configure marked.js
 marked.setOptions({
   breaks: true,          // Interpret line breaks as <br>
@@ -601,88 +665,93 @@ function addMessageToChat(message, sender) {
   return messageId;
 }
 
+// Function to create prompt from chat bubbles
+function createPromptFromChatBubbles(message) {
+  const chatBubbles = document.querySelectorAll('.message');
+  let prompt = '<bos>';
+  
+  // If this is the first message, include system prompt
+  if (chatBubbles.length === 0) {
+    prompt += loadSystemPrompt();
+  }
+
+  // Add existing messages to prompt
+  chatBubbles.forEach((bubble, index) => {
+    const isUser = bubble.classList.contains('user-message');
+    const content = bubble.querySelector('.message-content').textContent;
+    
+    if (index === 0 && chatBubbles.length === 0) {
+      // First message includes system prompt
+      prompt += `\n${content}<end_of_turn>`;
+    } else {
+      prompt += `<start_of_turn>${isUser ? 'user' : 'assistant'}\n${content}<end_of_turn>`;
+    }
+  });
+
+  // Add current message
+  if (chatBubbles.length === 0) {
+    prompt += `\n${message}<end_of_turn>`;
+  } else {
+    prompt += `<start_of_turn>user\n${message}<end_of_turn>`;
+  }
+
+  return prompt;
+}
+
 // Handle message sending
 async function sendMessage() {
+  const messageInput = document.getElementById('messageInput');
   const message = messageInput.value.trim();
+  
   if (!message) return;
   
-  // Disable input while processing
-  messageInput.disabled = true;
-  sendButton.disabled = true;
+  // Get the current chat history
+  const history = currentChat ? currentChat.messages : [];
+  
+  // Get the selected prompt and its parameters
+  const promptSelect = document.getElementById('promptSelect');
+  const selectedPrompt = promptSelect.value;
+  const prompts = loadSavedPrompts();
+  const prompt = prompts.find(p => p.name === selectedPrompt);
   
   // Add user message to chat
-  addMessageToChat(message, 'user');
+  addMessageToChat('user', message);
+  
+  // Prepare assistant's response
+  const assistantMessageDiv = document.createElement('div');
+  assistantMessageDiv.className = 'message assistant-message';
+  assistantMessageDiv.innerHTML = '<div class="message-content">Thinking...</div>';
+  chatContainer.appendChild(assistantMessageDiv);
+  chatContainer.scrollTop = chatContainer.scrollHeight;
   
   // Clear input
   messageInput.value = '';
   
   try {
-    // Create a placeholder for the assistant's response
-    const assistantMessageId = addMessageToChat('', 'assistant');
-    let responseText = '';
+    // Use prompt parameters if available, otherwise use current modelParams
+    const parameters = prompt && prompt.parameters ? prompt.parameters : modelParams;
     
-    // Get the current chat history in the correct format
-    const history = currentChat ? currentChat.messages : [];
-    
-    // Set up streaming listener
-    const removeStreamingListener = window.electronAPI.onStreamingToken((data) => {
-      const assistantMessage = document.getElementById(assistantMessageId);
-      if (assistantMessage) {
-        if (data.isComplete) {
-          // For complete messages, render the final markdown
-          assistantMessage.querySelector('.message-content').innerHTML = processMarkdown(data.token);
-          responseText = data.token;
-        } else {
-          // For streaming tokens, append to the text and convert to markdown
-          responseText += data.token;
-          assistantMessage.querySelector('.message-content').innerHTML = processMarkdown(responseText);
-        }
-      }
-      
-      // If the response is complete, update chat history
-      if (data.isComplete) {
-        removeStreamingListener();
-        
-        // Clean the response by removing any "model" prefix before storing in history
-        let cleanResponse = data.token;
-        if (cleanResponse.startsWith('model')) {
-          cleanResponse = cleanResponse.replace(/^model\s*\n*/, '');
-        }
-        
-        // Update chat history in the correct format
-        if (!currentChat) {
-          currentChat = {
-            id: Date.now().toString(),
-            title: `Chat ${allChats.length + 1}`,
-            messages: [],
-            createdAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString()
-          };
-          allChats.unshift(currentChat);
-        }
-        
-        // Add messages to history in the correct format
-        currentChat.messages.push(
-          { role: 'user', content: message },
-          { role: 'assistant', content: cleanResponse }
-        );
-        
-        // Save current chat
-        saveCurrentChat();
-        
-        messageInput.disabled = false;
-        sendButton.disabled = false;
-        messageInput.focus();
-      }
+    // Send message to main process with current parameters and prompt
+    const response = await window.electron.sendMessage(message, {
+      ...parameters,
+      history: history,
+      prompt: prompt ? prompt.content : null
     });
     
-    // Send message to main process with correct history format
-    await window.electronAPI.sendMessage(message, history, modelParams);
+    // Update assistant's message with the response
+    assistantMessageDiv.innerHTML = `<div class="message-content">${response}</div>`;
+    
+    // Save the chat with the selected prompt
+    if (currentChat) {
+      currentChat.messages.push(
+        { role: 'user', content: message },
+        { role: 'assistant', content: response }
+      );
+      saveCurrentChat();
+    }
   } catch (error) {
     console.error('Error sending message:', error);
-    messageInput.disabled = false;
-    sendButton.disabled = false;
-    messageInput.focus();
+    assistantMessageDiv.innerHTML = `<div class="message-content error">Error: ${error.message}</div>`;
   }
 }
 
@@ -994,4 +1063,405 @@ document.addEventListener('DOMContentLoaded', function() {
   // Initialize the chat interface and search functionality
   showChatInterface();
   initializeSearch();
-}); 
+});
+
+// Load system prompt when settings modal is opened
+document.getElementById('settings-modal').addEventListener('show', () => {
+  const systemPromptTextarea = document.getElementById('system-prompt');
+  systemPromptTextarea.value = loadSystemPrompt();
+});
+
+// Save system prompt when save button is clicked
+document.getElementById('save-system-prompt').addEventListener('click', () => {
+  const systemPromptTextarea = document.getElementById('system-prompt');
+  const newPrompt = systemPromptTextarea.value.trim();
+  
+  if (newPrompt) {
+    saveSystemPrompt(newPrompt);
+    showNotification('System prompt saved successfully!');
+  } else {
+    showNotification('Please enter a valid system prompt', 'error');
+  }
+});
+
+// Reset system prompt to default
+document.getElementById('reset-system-prompt').addEventListener('click', () => {
+  const systemPromptTextarea = document.getElementById('system-prompt');
+  systemPromptTextarea.value = defaultSystemPrompt;
+  saveSystemPrompt(defaultSystemPrompt);
+  showNotification('System prompt reset to default');
+});
+
+// System Prompt Template Management
+const defaultPromptTemplate = `<bos><start_of_turn>user
+I am a helpful AI assistant focused on providing accurate, clear, and concise information. I aim to be direct while remaining friendly. I explain complex topics simply and acknowledge when I'm unsure. I follow best practices in coding and provide practical solutions with proper error handling. I maintain objectivity and respect in all interactions.
+
+${msg.content}<end_of_turn>`;
+
+let currentPromptTemplate = defaultPromptTemplate;
+
+// Load saved prompt templates
+function loadSavedPromptTemplates() {
+    const savedTemplates = JSON.parse(localStorage.getItem('savedPromptTemplates') || '[]');
+    const list = document.getElementById('saved-prompts-list');
+    list.innerHTML = '';
+    
+    savedTemplates.forEach((template, index) => {
+        const item = document.createElement('div');
+        item.className = 'prompt-template-item';
+        item.innerHTML = `
+            <span>${template.name || `Template ${index + 1}`}</span>
+            <div class="prompt-template-actions">
+                <button class="btn" onclick="loadPromptTemplate(${index})">Load</button>
+                <button class="btn" onclick="deletePromptTemplate(${index})">Delete</button>
+            </div>
+        `;
+        list.appendChild(item);
+    });
+}
+
+// Save prompt template
+function savePromptTemplate() {
+    const template = document.getElementById('system-prompt-template').value.trim();
+    if (!template) {
+        showNotification('Please enter a valid prompt template', 'error');
+        return;
+    }
+
+    const name = prompt('Enter a name for this template:');
+    if (!name) return;
+
+    const savedTemplates = JSON.parse(localStorage.getItem('savedPromptTemplates') || '[]');
+    savedTemplates.push({
+        name,
+        template,
+        parameters: { ...modelParams }
+    });
+
+    localStorage.setItem('savedPromptTemplates', JSON.stringify(savedTemplates));
+    loadSavedPromptTemplates();
+    showNotification('Prompt template saved successfully!');
+}
+
+// Load prompt template
+function loadPromptTemplate(index) {
+    const savedTemplates = JSON.parse(localStorage.getItem('savedPromptTemplates') || '[]');
+    if (index >= 0 && index < savedTemplates.length) {
+        const template = savedTemplates[index];
+        document.getElementById('system-prompt-template').value = template.template;
+        currentPromptTemplate = template.template;
+        
+        // Update model parameters if they exist
+        if (template.parameters) {
+            Object.keys(template.parameters).forEach(key => {
+                const slider = document.getElementById(`${key}-slider`);
+                const value = document.getElementById(`${key}-value`);
+                if (slider && value) {
+                    slider.value = template.parameters[key];
+                    value.textContent = template.parameters[key];
+                    modelParams[key] = template.parameters[key];
+                }
+            });
+        }
+        
+        updatePromptPreview();
+        showNotification('Prompt template loaded successfully!');
+    }
+}
+
+// Delete prompt template
+function deletePromptTemplate(index) {
+    if (confirm('Are you sure you want to delete this template?')) {
+        const savedTemplates = JSON.parse(localStorage.getItem('savedPromptTemplates') || '[]');
+        savedTemplates.splice(index, 1);
+        localStorage.setItem('savedPromptTemplates', JSON.stringify(savedTemplates));
+        loadSavedPromptTemplates();
+        showNotification('Prompt template deleted');
+    }
+}
+
+// Update prompt preview
+function updatePromptPreview() {
+    const template = document.getElementById('system-prompt-template').value;
+    const preview = document.getElementById('prompt-preview-content');
+    const exampleMessage = 'Hello, how can you help me?';
+    const previewText = template.replace('${msg.content}', exampleMessage);
+    preview.textContent = previewText;
+}
+
+// Event listeners for prompt editor
+document.getElementById('system-prompt-template').addEventListener('input', updatePromptPreview);
+document.getElementById('save-prompt-template').addEventListener('click', savePromptTemplate);
+document.getElementById('load-default-template').addEventListener('click', () => {
+    document.getElementById('system-prompt-template').value = defaultPromptTemplate;
+    currentPromptTemplate = defaultPromptTemplate;
+    updatePromptPreview();
+});
+
+// Initialize prompt editor
+document.addEventListener('DOMContentLoaded', () => {
+    loadSavedPromptTemplates();
+    updatePromptPreview();
+});
+
+// Function to load saved prompts
+function loadSavedPrompts() {
+    const savedPrompts = localStorage.getItem('savedPrompts');
+    console.log('Loading saved prompts from localStorage:', savedPrompts); // Debug log
+    if (savedPrompts) {
+        try {
+            const prompts = JSON.parse(savedPrompts);
+            console.log('Parsed prompts:', prompts); // Debug log
+            return prompts;
+        } catch (e) {
+            console.error('Error parsing saved prompts:', e);
+            return [];
+        }
+    }
+    return [];
+}
+
+// Save prompts to localStorage
+function savePrompts(prompts) {
+    console.log('Saving prompts:', prompts); // Debug log
+    localStorage.setItem('savedPrompts', JSON.stringify(prompts));
+}
+
+// Add a new prompt with parameters
+function addPrompt(name, content, parameters) {
+    const prompts = loadSavedPrompts();
+    prompts.push({ 
+        name, 
+        content, 
+        parameters: {
+            temperature: parameters.temperature,
+            top_p: parameters.top_p,
+            max_length: parameters.max_length,
+            repeat_penalty: parameters.repeat_penalty,
+            frequency_penalty: parameters.frequency_penalty
+        }
+    });
+    savePrompts(prompts);
+    return prompts;
+}
+
+// Function to save a prompt
+function savePrompt() {
+    const promptName = document.getElementById('promptName').value.trim();
+    const promptContent = document.getElementById('systemPrompt').value.trim();
+    
+    if (!promptName) {
+        showToast('Please enter a name for the prompt', 'error');
+        return;
+    }
+    
+    if (!promptContent) {
+        showToast('Please enter a prompt', 'error');
+        return;
+    }
+    
+    const prompts = loadSavedPrompts();
+    console.log('Current saved prompts:', prompts); // Debug log
+    
+    const existingPrompt = prompts.find(p => p.name === promptName);
+    
+    if (existingPrompt) {
+        if (confirm(`A prompt with the name "${promptName}" already exists. Do you want to update it?`)) {
+            // Update existing prompt
+            existingPrompt.content = promptContent;
+            existingPrompt.parameters = {
+                temperature: modelParams.temperature,
+                top_p: modelParams.top_p,
+                max_length: modelParams.max_length,
+                repeat_penalty: modelParams.repeat_penalty,
+                frequency_penalty: modelParams.frequency_penalty
+            };
+            savePrompts(prompts);
+            showToast('Prompt updated successfully', 'success');
+        }
+    } else {
+        // Add new prompt
+        const newPrompt = {
+            name: promptName,
+            content: promptContent,
+            parameters: {
+                temperature: modelParams.temperature,
+                top_p: modelParams.top_p,
+                max_length: modelParams.max_length,
+                repeat_penalty: modelParams.repeat_penalty,
+                frequency_penalty: modelParams.frequency_penalty
+            }
+        };
+        prompts.push(newPrompt);
+        savePrompts(prompts);
+        showToast('Prompt saved successfully', 'success');
+    }
+    
+    // Force update the prompt list
+    updatePromptList(prompts);
+}
+
+// Function to handle prompt selection from dropdown
+function handlePromptSelection() {
+    const promptSelect = document.getElementById('promptSelect');
+    const selectedPrompt = promptSelect.value;
+    const prompts = loadSavedPrompts();
+    const prompt = prompts.find(p => p.name === selectedPrompt);
+    
+    if (prompt) {
+        // Set the form values
+        document.getElementById('promptName').value = prompt.name;
+        document.getElementById('systemPrompt').value = prompt.content;
+        
+        // Update model parameters
+        if (prompt.parameters) {
+            modelParams = {
+                ...modelParams,
+                ...prompt.parameters
+            };
+            
+            // Update UI sliders
+            document.getElementById('temperatureValue').textContent = prompt.parameters.temperature;
+            document.getElementById('temperatureSlider').value = prompt.parameters.temperature;
+            
+            document.getElementById('topPValue').textContent = prompt.parameters.top_p;
+            document.getElementById('topPSlider').value = prompt.parameters.top_p;
+            
+            document.getElementById('maxLengthValue').textContent = prompt.parameters.max_length;
+            document.getElementById('maxLengthSlider').value = prompt.parameters.max_length;
+            
+            document.getElementById('repeatPenaltyValue').textContent = prompt.parameters.repeat_penalty;
+            document.getElementById('repeatPenaltySlider').value = prompt.parameters.repeat_penalty;
+            
+            document.getElementById('frequencyPenaltyValue').textContent = prompt.parameters.frequency_penalty;
+            document.getElementById('frequencyPenaltySlider').value = prompt.parameters.frequency_penalty;
+        }
+        
+        showToast('Prompt loaded successfully', 'success');
+    }
+}
+
+// Update the prompt list display
+function updatePromptList(prompts) {
+    console.log('Updating prompt list with:', prompts); // Debug log
+    
+    const promptSelect = document.getElementById('promptSelect');
+    if (!promptSelect) {
+        console.error('promptSelect element not found!');
+        return;
+    }
+    
+    promptSelect.innerHTML = '<option value="">Select a prompt</option>';
+    
+    if (prompts && prompts.length > 0) {
+        console.log('Adding prompts to dropdown:', prompts); // Debug log
+        prompts.forEach(prompt => {
+            const option = document.createElement('option');
+            option.value = prompt.name;
+            option.textContent = `${prompt.name} (temp: ${prompt.parameters.temperature}, top_p: ${prompt.parameters.top_p})`;
+            promptSelect.appendChild(option);
+        });
+    }
+}
+
+// Add event listener for prompt selection
+document.getElementById('promptSelect').addEventListener('change', handlePromptSelection);
+
+// Initialize prompt list on load
+document.addEventListener('DOMContentLoaded', () => {
+    console.log('DOM Content Loaded - Initializing prompts'); // Debug log
+    const prompts = loadSavedPrompts();
+    console.log('Loaded prompts on DOM Content Loaded:', prompts); // Debug log
+    updatePromptList(prompts);
+});
+
+// Function to edit a prompt
+function editPrompt(promptName) {
+    const prompts = loadSavedPrompts();
+    const prompt = prompts.find(p => p.name === promptName);
+    
+    if (prompt) {
+        // Set the form values
+        document.getElementById('promptName').value = prompt.name;
+        document.getElementById('systemPrompt').value = prompt.content;
+        
+        // Update model parameters
+        if (prompt.parameters) {
+            modelParams = {
+                ...modelParams,
+                ...prompt.parameters
+            };
+            
+            // Update UI sliders
+            document.getElementById('temperatureValue').textContent = prompt.parameters.temperature;
+            document.getElementById('temperatureSlider').value = prompt.parameters.temperature;
+            
+            document.getElementById('topPValue').textContent = prompt.parameters.top_p;
+            document.getElementById('topPSlider').value = prompt.parameters.top_p;
+            
+            document.getElementById('maxLengthValue').textContent = prompt.parameters.max_length;
+            document.getElementById('maxLengthSlider').value = prompt.parameters.max_length;
+            
+            document.getElementById('repeatPenaltyValue').textContent = prompt.parameters.repeat_penalty;
+            document.getElementById('repeatPenaltySlider').value = prompt.parameters.repeat_penalty;
+            
+            document.getElementById('frequencyPenaltyValue').textContent = prompt.parameters.frequency_penalty;
+            document.getElementById('frequencyPenaltySlider').value = prompt.parameters.frequency_penalty;
+        }
+        
+        showToast('Prompt loaded for editing', 'success');
+    }
+}
+
+// Function to delete a prompt
+function deletePrompt(promptName) {
+    if (confirm(`Are you sure you want to delete the prompt "${promptName}"?`)) {
+        const prompts = loadSavedPrompts();
+        const updatedPrompts = prompts.filter(p => p.name !== promptName);
+        savePrompts(updatedPrompts);
+        updatePromptList(updatedPrompts);
+        showToast('Prompt deleted successfully', 'success');
+        
+        // Clear the form if the deleted prompt was being edited
+        if (document.getElementById('promptName').value === promptName) {
+            resetPrompt();
+        }
+    }
+}
+
+// Reset prompt and parameters to default values
+function resetPrompt() {
+    // Reset prompt content and name
+    document.getElementById('systemPrompt').value = defaultSystemPrompt;
+    document.getElementById('promptName').value = '';
+    
+    // Reset model parameters to default values
+    modelParams = {
+        temperature: 0.7,
+        top_p: 0.9,
+        max_length: 2048,
+        repeat_penalty: 1.5,
+        frequency_penalty: 0.2
+    };
+    
+    // Update UI sliders to default values
+    document.getElementById('temperatureValue').textContent = modelParams.temperature;
+    document.getElementById('temperatureSlider').value = modelParams.temperature;
+    
+    document.getElementById('topPValue').textContent = modelParams.top_p;
+    document.getElementById('topPSlider').value = modelParams.top_p;
+    
+    document.getElementById('maxLengthValue').textContent = modelParams.max_length;
+    document.getElementById('maxLengthSlider').value = modelParams.max_length;
+    
+    document.getElementById('repeatPenaltyValue').textContent = modelParams.repeat_penalty;
+    document.getElementById('repeatPenaltySlider').value = modelParams.repeat_penalty;
+    
+    document.getElementById('frequencyPenaltyValue').textContent = modelParams.frequency_penalty;
+    document.getElementById('frequencyPenaltySlider').value = modelParams.frequency_penalty;
+    
+    // Reset prompt selection
+    document.getElementById('promptSelect').value = '';
+    
+    showToast('Prompt and parameters reset to default', 'success');
+} 
