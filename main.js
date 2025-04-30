@@ -429,32 +429,13 @@ async function processChatMessage(message, history, params = null) {
         
         // Add system prompt only if this is the first message
         if (!history || history.length === 0) {
-            prompt += `<start_of_turn>user\nI am a helpful AI assistant focused on providing accurate, clear, and concise information. I aim to be direct while remaining friendly. I explain complex topics simply and acknowledge when I'm unsure. I follow best practices in coding and provide practical solutions with proper error handling. I maintain objectivity and respect in all interactions.
-
-Here are some example conversations to demonstrate my style:
-
-User: What is JavaScript?
-Assistant: JavaScript is a programming language used primarily for web development. It allows you to add interactivity to websites, create web applications, and build server-side applications using Node.js. It's one of the core technologies of the web alongside HTML and CSS.
-
-User: How do I create a function in JavaScript?
-Assistant: In JavaScript, you can create a function using the 'function' keyword or arrow syntax. Here's an example:
-\`\`\`javascript
-// Traditional function
-function greet(name) {
-    return \`Hello, \${name}!\`;
-}
-
-// Arrow function
-const greet = (name) => \`Hello, \${name}!\`;
-\`\`\`
-
-User: What's the difference between let and const?
-Assistant: 'let' and 'const' are both used to declare variables in JavaScript. The key differences are:
-- 'let' allows reassignment: \`let x = 1; x = 2;\` is valid
-- 'const' prevents reassignment: \`const x = 1; x = 2;\` will throw an error
-- Both are block-scoped, unlike 'var' which is function-scoped
-
-Please answer all questions in a concise and informative manner. Do not repeat yourself or include unnecessary text. Focus on providing clear, direct answers.<end_of_turn>`;
+            prompt += 
+            
+`<start_of_turn>user
+You are a helpful AI assistant focused on providing accurate, clear, and concise information. I aim to be direct while remaining friendly. I explain complex topics simply and acknowledge when I'm unsure. I follow best practices in coding and provide practical solutions with proper error handling. I maintain objectivity and respect in all interactions.
+Please answer all questions in a concise and informative manner. Do not repeat yourself or include unnecessary text. Focus on providing clear, direct answers.<end_of_turn>
+<start_of_turn>model
+Yes, i understand. How can i help you with?<end_of_turn>`;
         }
 
         // Add chat history if available
@@ -702,84 +683,41 @@ app.on('window-all-closed', function () {
 function setupIPCHandlers() {
   console.log("Setting up IPC handlers");
   
-  // Handle sending messages to the model
-  ipcMain.handle('chat-message', async (event, params) => {
-    console.log("IPC: chat-message received", params);
-    try {
-      const { message, history, params: modelParams } = params;
-      console.log(`Processing message: "${message}" with history length: ${history.length}`);
-      const result = await processChatMessage(message, history, modelParams);
-      console.log("IPC: chat-message processed");
-      return result;
-    } catch (error) {
-      console.error("IPC: chat-message error:", error);
-      return { success: false, error: error.message };
-    }
+  // Model management
+  ipcMain.handle('download-model', async (event, modelName) => {
+    return await downloadModel(modelName);
+  });
+
+  ipcMain.handle('select-local-model', async (event, modelPath) => {
+    return await selectLocalModel(modelPath);
+  });
+
+  ipcMain.handle('initialize-model', async (event, modelPath) => {
+    return await initializeModel(modelPath);
+  });
+
+  // Chat functionality
+  ipcMain.handle('chat-message', async (event, { message, history, params, systemPrompt }) => {
+    return await processChatMessage(message, history, params, systemPrompt);
+  });
+
+  // Template management
+  ipcMain.handle('save-template', async (event, template) => {
+    return await saveTemplate(template);
+  });
+
+  ipcMain.handle('load-templates', async () => {
+    return await loadTemplates();
+  });
+
+  ipcMain.handle('delete-template', async (event, templateId) => {
+    return await deleteTemplate(templateId);
   });
   
   // Handle model checking
   ipcMain.handle('check-model', async () => {
     console.log("IPC: check-model received");
     return hasCustomModel() || modelExists();
-  });
-  
-  // Handle model initialization
-  ipcMain.handle('init-model', async () => {
-    console.log("IPC: init-model received");
-    try {
-      const result = await initializeModel();
-      console.log("IPC: init-model completed");
-      return result;
-    } catch (error) {
-      console.error("IPC: init-model error:", error);
-      return { success: false, error: error.message };
-    }
-  });
-  
-  // Handle model download
-  ipcMain.handle('download-model', async () => {
-    console.log("IPC: download-model received");
-    try {
-      await downloadModel();
-      console.log("IPC: download-model completed");
-      return { success: true };
-    } catch (error) {
-      console.error("IPC: download-model error:", error);
-      return { success: false, error: error.message };
-    }
-  });
-  
-  // Handle local model selection
-  ipcMain.handle('select-local-model', async () => {
-    console.log("IPC: select-local-model received");
-    try {
-      const modelPath = await selectLocalModel();
-      if (modelPath) {
-        await initializeModel(modelPath);
-        console.log("IPC: select-local-model completed");
-        return { success: true, path: modelPath };
-      } else {
-        console.log("IPC: select-local-model canceled");
-        return { success: false, error: 'Model selection canceled' };
-      }
-    } catch (error) {
-      console.error("IPC: select-local-model error:", error);
-      return { success: false, error: error.message };
-    }
-  });
-  
-  // Handle raw chat string
-  ipcMain.handle('raw-chat-string', async (event, params) => {
-    console.log("IPC: raw-chat-string received");
-    try {
-      const { rawString, params: modelParams } = params;
-      const result = await processRawChatString(rawString, modelParams);
-      console.log("IPC: raw-chat-string processed");
-      return result;
-    } catch (error) {
-      console.error("IPC: raw-chat-string error:", error);
-      return { success: false, error: error.message };
-    }
   });
   
   console.log("IPC handlers setup complete");

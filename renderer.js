@@ -716,7 +716,7 @@ async function sendMessage() {
     });
     
     // Send message to main process with correct history format
-    await window.electronAPI.sendMessage(message, history, modelParams);
+    await window.electronAPI.sendMessage(message, history, modelParams, currentTemplate?.systemPrompt || '');
   } catch (error) {
     console.error('Error sending message:', error);
     messageInput.disabled = false;
