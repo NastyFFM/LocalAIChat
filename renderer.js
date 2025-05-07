@@ -588,12 +588,8 @@ function updateStatus(status, message) {
   // Update text
   statusText.textContent = message;
   
-  // Show/hide change model button
-  if (status === 'ready' || status === 'exists') {
-    changeModelButton.classList.remove('hidden');
-  } else {
-    changeModelButton.classList.add('hidden');
-  }
+  // Always show change model button
+  changeModelButton.classList.remove('hidden');
 }
 
 // Show download section

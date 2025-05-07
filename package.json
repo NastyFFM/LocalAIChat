@@ -7,8 +7,9 @@
     "start": "electron .",
     "dev": "electron . --dev",
     "build": "electron-builder",
-    "build:mac": "electron-builder --mac",
-    "build:win": "electron-builder --win"
+    "build:mac": "electron-builder --mac --universal",
+    "build:win": "electron-builder --win",
+    "postinstall": "electron-builder install-app-deps"
   },
   "author": "",
   "license": "MIT",
@@ -28,17 +29,24 @@
     "appId": "com.localai.chat",
     "productName": "LocalAI Chat",
     "mac": {
-      "category": "public.app-category.utilities"
+      "category": "public.app-category.utilities",
+      "target": ["dmg", "zip"],
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist"
     },
     "win": {
       "target": "nsis"
     },
     "files": [
       "**/*",
-      "!models/*"
+      "!models/*",
+      "!node_modules/@node-llama-cpp/**/*"
     ],
     "directories": {
-      "buildResources": "resources"
+      "buildResources": "resources",
+      "output": "dist"
     },
     "extraResources": [
       {
@@ -48,6 +56,9 @@
           "*.gguf"
         ]
       }
+    ],
+    "asarUnpack": [
+      "node_modules/@node-llama-cpp/**/*"
     ]
   }
 }
