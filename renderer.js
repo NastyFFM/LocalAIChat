@@ -47,6 +47,12 @@ const clearSearchButton = document.getElementById('clear-search');
 // Template management
 let templates = [];
 
+// Template selection modal elements
+const templateSelectionModal = document.getElementById('template-selection-modal');
+const templateSelectionDropdown = document.getElementById('template-selection-dropdown');
+const startChatButton = document.getElementById('start-chat-button');
+const closeTemplateModalButton = document.querySelector('.close-template-modal');
+
 // Validate DOM elements
 function validateDOMElements() {
   // Check that all required elements exist
@@ -640,89 +646,68 @@ function addMessageToChat(message, sender) {
   return messageId;
 }
 
-// Handle message sending
-async function sendMessage() {
+// Send message to main process
+function sendMessage() {
+  const messageInput = document.getElementById('message-input');
   const message = messageInput.value.trim();
   if (!message) return;
+
+  // Get current template's parameters and system prompt
+  const template = currentTemplate;
+  if (!template) {
+    showToast('Please select a template first', 'error');
+    return;
+  }
+
+  // Get current system prompt from input field
+  const currentSystemPrompt = document.getElementById('system-prompt').value.trim();
   
-  // Disable input while processing
-  messageInput.disabled = true;
-  sendButton.disabled = true;
-  
-  // Add user message to chat
-  addMessageToChat(message, 'user');
-  
+  // Check if system prompt differs from template
+  if (currentSystemPrompt !== template.systemPrompt) {
+    console.warn('System prompt differs from template:', {
+      template: template.systemPrompt,
+      current: currentSystemPrompt
+    });
+  }
+
+  // Add user message to chat history
+  const userMessage = {
+    role: 'user',
+    content: message,
+    timestamp: new Date().toISOString(),
+    systemPrompt: currentSystemPrompt
+  };
+  chatHistory.push(userMessage);
+
+  // Save chat history
+  saveChatHistory();
+
   // Clear input
   messageInput.value = '';
-  
-  try {
-    // Create a placeholder for the assistant's response
-    const assistantMessageId = addMessageToChat('', 'assistant');
-    let responseText = '';
-    
-    // Get the current chat history in the correct format
-    const history = currentChat ? currentChat.messages : [];
-    
-    // Set up streaming listener
-    const removeStreamingListener = window.electronAPI.onStreamingToken((data) => {
-      const assistantMessage = document.getElementById(assistantMessageId);
-      if (assistantMessage) {
-        if (data.isComplete) {
-          // For complete messages, render the final markdown
-          assistantMessage.querySelector('.message-content').innerHTML = processMarkdown(data.token);
-          responseText = data.token;
-        } else {
-          // For streaming tokens, append to the text and convert to markdown
-          responseText += data.token;
-          assistantMessage.querySelector('.message-content').innerHTML = processMarkdown(responseText);
-        }
-      }
-      
-      // If the response is complete, update chat history
-      if (data.isComplete) {
-        removeStreamingListener();
-        
-        // Clean the response by removing any "model" prefix before storing in history
-        let cleanResponse = data.token;
-        if (cleanResponse.startsWith('model')) {
-          cleanResponse = cleanResponse.replace(/^model\s*\n*/, '');
-        }
-        
-        // Update chat history in the correct format
-        if (!currentChat) {
-          currentChat = {
-            id: Date.now().toString(),
-            title: `Chat ${allChats.length + 1}`,
-            messages: [],
-            createdAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString()
-          };
-          allChats.unshift(currentChat);
-        }
-        
-        // Add messages to history in the correct format
-        currentChat.messages.push(
-          { role: 'user', content: message },
-          { role: 'assistant', content: cleanResponse }
-        );
-        
-        // Save current chat
-        saveCurrentChat();
-        
-        messageInput.disabled = false;
-        sendButton.disabled = false;
-        messageInput.focus();
-      }
-    });
-    
-    // Send message to main process with correct history format
-    await window.electronAPI.sendMessage(message, history, modelParams, currentTemplate?.systemPrompt || '');
-  } catch (error) {
-    console.error('Error sending message:', error);
-    messageInput.disabled = false;
-    sendButton.disabled = false;
-    messageInput.focus();
-  }
+
+  // Send message to main process
+  window.electron.sendMessage({
+    message,
+    chatHistory,
+    parameters: template.parameters,
+    systemPrompt: currentSystemPrompt,
+    templateId: template.id
+  });
+
+  // Add empty assistant message to chat history
+  const assistantMessage = {
+    role: 'assistant',
+    content: '',
+    timestamp: new Date().toISOString(),
+    systemPrompt: currentSystemPrompt
+  };
+  chatHistory.push(assistantMessage);
+
+  // Save chat history
+  saveChatHistory();
+
+  // Update chat display
+  updateChatDisplay();
 }
 
 // Download model
@@ -1153,4 +1138,101 @@ document.addEventListener('DOMContentLoaded', function() {
   // Initialize the chat interface and search functionality
   showChatInterface();
   initializeSearch();
+});
+
+// Show template selection modal
+function showTemplateSelectionModal() {
+  templateSelectionModal.style.display = 'block';
+  document.body.style.overflow = 'hidden';
+  updateTemplateSelectionDropdown();
+}
+
+// Close template selection modal
+function closeTemplateSelectionModal() {
+  templateSelectionModal.style.display = 'none';
+  document.body.style.overflow = 'auto';
+}
+
+// Update template selection dropdown
+function updateTemplateSelectionDropdown() {
+  templateSelectionDropdown.innerHTML = '<option value="">Select a template</option>';
+  templates.forEach(template => {
+    const option = document.createElement('option');
+    option.value = template.name;
+    option.textContent = `${template.name} - ${template.description}`;
+    templateSelectionDropdown.appendChild(option);
+  });
+}
+
+// Start chat with selected template
+function startChatWithTemplate() {
+  const selectedTemplateName = templateSelectionDropdown.value;
+  if (!selectedTemplateName) {
+    showToast('Please select a template', 'error');
+    return;
+  }
+
+  const template = templates.find(t => t.name === selectedTemplateName);
+  if (template) {
+    currentTemplate = template;
+    closeTemplateSelectionModal();
+    createNewChat();
+    showToast('Chat started with template: ' + template.name, 'success');
+  }
+}
+
+// Add event listeners for template selection modal
+function setupTemplateSelectionEventListeners() {
+  // New chat button
+  if (newChatButton) {
+    newChatButton.addEventListener('click', showTemplateSelectionModal);
+  }
+
+  // Start chat button
+  if (startChatButton) {
+    startChatButton.addEventListener('click', startChatWithTemplate);
+  }
+
+  // Close modal button
+  if (closeTemplateModalButton) {
+    closeTemplateModalButton.addEventListener('click', closeTemplateSelectionModal);
+  }
+
+  // Close modal when clicking outside
+  window.addEventListener('click', (event) => {
+    if (event.target === templateSelectionModal) {
+      closeTemplateSelectionModal();
+    }
+  });
+}
+
+// Initialize template selection
+document.addEventListener('DOMContentLoaded', () => {
+  setupTemplateSelectionEventListeners();
+  loadTemplates();
+});
+
+// Setup event listeners for streaming responses
+function setupStreamingEventListeners() {
+  window.electron.onStreamingToken((data) => {
+    const lastMessage = chatHistory[chatHistory.length - 1];
+    if (lastMessage && lastMessage.role === 'assistant') {
+      if (data.isComplete) {
+        lastMessage.content = data.token;
+      } else {
+        lastMessage.content += data.token;
+      }
+      saveChatHistory();
+      updateChatDisplay();
+    }
+  });
+}
+
+// Initialize chat functionality
+document.addEventListener('DOMContentLoaded', () => {
+  setupTemplateSelectionEventListeners();
+  setupStreamingEventListeners();
+  loadTemplates();
+  loadChatHistory();
+  updateChatDisplay();
 }); 
