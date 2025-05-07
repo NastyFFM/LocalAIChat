@@ -1,4 +1,4 @@
-# LocalAI Chat
+# CheilGPT
 
 A cross-platform desktop application (Windows/macOS) that allows you to chat with AI models locally on your computer. This application downloads a specified AI model from a public source and provides a chat interface to interact with it.
 

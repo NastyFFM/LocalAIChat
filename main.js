@@ -18,6 +18,10 @@ function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1200,
     height: 800,
+    title: 'CheilGPT',
+    icon: process.platform === 'darwin' 
+      ? path.join(__dirname, 'assets', 'IconCheilGPT.icns')
+      : path.join(__dirname, 'assets', 'IconCheilGPT.png'),
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
@@ -408,6 +412,9 @@ async function processChatMessage(message, history, params = null) {
         throw new Error('Model not initialized');
     }
 
+    let context = null;
+    let sequence = null;
+
     // Default parameters
     const defaultParams = {
         temperature: 0.1,           // Lower temperature for more deterministic output
@@ -429,9 +436,9 @@ async function processChatMessage(message, history, params = null) {
         const systemPrompt = "<start_of_turn>user\nFrom this point on, you will behave strictly according to the role I am about to define for you:  \nYou are an intelligent, friendly, clever, and helpful assistant. Your core purpose is to support the user in any way possible — whether by explaining concepts, solving problems, offering ideas, providing technical assistance, or simply engaging in thoughtful conversation.  \nYou have deep and broad knowledge across many fields, you think critically, ask smart follow-up questions, and communicate clearly. You break down complex ideas into simple explanations and offer structured, relevant, and well-considered responses. When appropriate, you provide options, clarifications, or additional context.  \nYou maintain a warm, respectful, and positive tone at all times. You are never condescending or dismissive. Instead, you are supportive, thoughtful, and professional — aiming to make every interaction useful and pleasant.  \nOnce I finish describing your role (with this message), please confirm that you understand and are ready to act in this role. Then wait for my next input and respond accordingly — always as the intelligent, friendly, clever, and helpful assistant you are.  \nPlease begin now by confirming your understanding.<end_of_turn>\n<start_of_turn>model\nThank you for the clear and thoughtful description of my role.  \nI fully understand: from now on, I will act as an intelligent, friendly, clever, and helpful assistant. My focus is to support you in the best way possible — whether through clear explanations, creative thinking, technical guidance, or just meaningful conversation.  \nI'll be attentive, thoughtful, and professional in every interaction, and I'm ready to adapt to your needs.  \nGo ahead with your first request whenever you're ready — I'm here and ready to help!<end_of_turn>\n";
 
         // Add system prompt only if this is the first message
-        //if (!history || history.length === 0) {
+        if (!history || history.length === 0) {
             prompt += systemPrompt;
-        //}
+        }
 
         // Add chat history if available
         if (history && history.length > 0) {
@@ -448,86 +455,106 @@ async function processChatMessage(message, history, params = null) {
         console.log(prompt);
         console.log('=== END PROMPT ===\n');
         
-        // Create context and get sequence
-        const context = await model.createContext({
-            temperature: modelParams.temperature,
-            top_p: modelParams.top_p
-        });
-        const sequence = context.getSequence();
+        try {
+            // Create context and get sequence
+            context = await model.createContext({
+                temperature: modelParams.temperature,
+                top_p: modelParams.top_p
+            });
+            sequence = context.getSequence();
 
-        // Tokenize the prompt
-        const tokens = model.tokenize(prompt);
-        console.log('Tokenized prompt length:', tokens.length);
+            // Tokenize the prompt
+            const tokens = model.tokenize(prompt);
+            console.log('Tokenized prompt length:', tokens.length);
 
-        // Generate response
-        let response = '';
-        const stopCondition = (text) => {
-            // Stop on end_of_turn token
-            if (text.includes('<end_of_turn>')) {
-                return true;
-            }
-            // Stop on custom stop sequence
-            if (modelParams.stop_sequence && 
-                modelParams.stop_sequence !== '<end_of_turn>' && 
-                text.includes(modelParams.stop_sequence)) {
-                return true;
-            }
-            // Stop on max length
-            if (response.length > modelParams.max_length) {
-                return true;
-            }
-            return false;
-        };
+            // Generate response
+            let response = '';
+            const stopCondition = (text) => {
+                // Stop on end_of_turn token
+                if (text.includes('<end_of_turn>')) {
+                    return true;
+                }
+                // Stop on custom stop sequence
+                if (modelParams.stop_sequence && 
+                    modelParams.stop_sequence !== '<end_of_turn>' && 
+                    text.includes(modelParams.stop_sequence)) {
+                    return true;
+                }
+                // Stop on max length
+                if (response.length > modelParams.max_length) {
+                    return true;
+                }
+                return false;
+            };
 
-        for await (const token of sequence.evaluate(tokens)) {
-            // Make sure model is still available (in case of model switching)
-            if (!model) {
-                throw new Error('Model was unloaded during processing');
+            for await (const token of sequence.evaluate(tokens)) {
+                // Make sure model is still available (in case of model switching)
+                if (!model) {
+                    throw new Error('Model was unloaded during processing');
+                }
+                
+                const tokenText = model.detokenize([token]);
+                response += tokenText;
+                
+                // Send individual token to renderer
+                mainWindow.webContents.send('streaming-token', {
+                    token: tokenText,
+                    isComplete: false
+                });
+
+                if (stopCondition(response)) {
+                    break;
+                }
             }
+
+            // Clean up response by removing the end_of_turn token
+            response = response.replace(/<end_of_turn>.*$/, '').trim();
             
-            const tokenText = model.detokenize([token]);
-            response += tokenText;
+            // Remove repeated user input patterns from the response
+            if (message && response.includes(message)) {
+                const escapedMessage = message.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                const pattern = new RegExp(`(\\*\\*Date:\\*\\*)?${escapedMessage}`, 'g');
+                response = response.replace(pattern, '');
+            }
+
+            // Clean up any patterns like "🗓️ **Date:**" that might be duplicated
+            response = response.replace(/(🗓️\s*\*\*Date:\*\*)\s*🗓️\s*\*\*Date:\*\*/g, '$1');
             
-            // Send individual token to renderer
+            // Final cleanup of any remaining artifacts
+            response = response.replace(/🗓️\s*\*\*schreibe mir eine Einladung zum[^*]*\*\*/g, '🗓️ **Date:**');
+            
+            // Trim any excessive whitespace
+            response = response.trim();
+
+            // Log the AI's response
+            console.log('AI Response:', response);
+
+            // Send final complete response
             mainWindow.webContents.send('streaming-token', {
-                token: tokenText,
-                isComplete: false
+                token: response,
+                isComplete: true
             });
 
-            if (stopCondition(response)) {
-                break;
+            return response;
+        } finally {
+            // Clean up context and sequence
+            if (sequence) {
+                try {
+                    // The new API doesn't require explicit cleanup
+                    sequence = null;
+                } catch (error) {
+                    console.error('Error cleaning up sequence:', error);
+                }
+            }
+            if (context) {
+                try {
+                    // The new API doesn't require explicit cleanup
+                    context = null;
+                } catch (error) {
+                    console.error('Error cleaning up context:', error);
+                }
             }
         }
-
-        // Clean up response by removing the end_of_turn token
-        response = response.replace(/<end_of_turn>.*$/, '').trim();
-        
-        // Remove repeated user input patterns from the response
-        if (message && response.includes(message)) {
-            const escapedMessage = message.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-            const pattern = new RegExp(`(\\*\\*Date:\\*\\*)?${escapedMessage}`, 'g');
-            response = response.replace(pattern, '');
-        }
-
-        // Clean up any patterns like "🗓️ **Date:**" that might be duplicated
-        response = response.replace(/(🗓️\s*\*\*Date:\*\*)\s*🗓️\s*\*\*Date:\*\*/g, '$1');
-        
-        // Final cleanup of any remaining artifacts
-        response = response.replace(/🗓️\s*\*\*schreibe mir eine Einladung zum[^*]*\*\*/g, '🗓️ **Date:**');
-        
-        // Trim any excessive whitespace
-        response = response.trim();
-
-        // Log the AI's response
-        console.log('AI Response:', response);
-
-        // Send final complete response
-        mainWindow.webContents.send('streaming-token', {
-            token: response,
-            isComplete: true
-        });
-
-        return response;
     } catch (error) {
         console.error('Error processing chat message:', error);
         mainWindow.webContents.send('streaming-token', {

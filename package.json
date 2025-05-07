@@ -1,7 +1,7 @@
 {
-  "name": "localai-chat",
+  "name": "cheilgpt",
   "version": "1.0.0",
-  "description": "Chat application using local AI models",
+  "description": "CheilGPT - Local AI Chat Application",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
@@ -26,18 +26,21 @@
     "typescript": "^5.3.2"
   },
   "build": {
-    "appId": "com.localai.chat",
-    "productName": "LocalAI Chat",
+    "appId": "com.cheil.gpt",
+    "productName": "CheilGPT",
+    "icon": "assets/IconCheilGPT.png",
     "mac": {
       "category": "public.app-category.utilities",
       "target": ["dmg", "zip"],
       "hardenedRuntime": true,
       "gatekeeperAssess": false,
       "entitlements": "build/entitlements.mac.plist",
-      "entitlementsInherit": "build/entitlements.mac.plist"
+      "entitlementsInherit": "build/entitlements.mac.plist",
+      "icon": "assets/IconCheilGPT.icns"
     },
     "win": {
-      "target": "nsis"
+      "target": "nsis",
+      "icon": "assets/IconCheilGPT.png"
     },
     "files": [
       "**/*",
