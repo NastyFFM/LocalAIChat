@@ -325,14 +325,29 @@ function saveAllChats() {
   }
 }
 
-// Create a new chat
+function extractChatHistoryFromUI() {
+  const messages = [];
+  const messageElements = chatContainer.querySelectorAll('.message');
+  
+  messageElements.forEach(element => {
+    const isUser = element.classList.contains('user-message');
+    const content = element.querySelector('.message-content').textContent;
+    messages.push({
+      role: isUser ? 'user' : 'assistant',
+      content: content
+    });
+  });
+  
+  return messages;
+}
+
 function createNewChat() {
   // Generate a unique ID for the chat
   const chatId = Date.now().toString();
   const newChat = {
     id: chatId,
-    title: `Chat ${allChats.length + 1}`,
-    messages: [],
+    title: `Chat ${allChats.length + 1}`, // Temporary title
+    messages: [], // Start with empty messages array
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString()
   };
@@ -341,13 +356,19 @@ function createNewChat() {
   allChats.unshift(newChat);
   saveAllChats();
   
-  // Set the current chat and update UI
-  setCurrentChat(chatId);
-  renderChatList();
+  // Set the current chat
+  currentChat = newChat;
+  currentChatIndex = 0;
   
-  // Clear chat container
+  // Clear chat container and history
   chatContainer.innerHTML = '';
   chatHistory = [];
+  
+  // Update UI to show active chat
+  renderChatList();
+  
+  // Focus the message input
+  messageInput.focus();
 }
 
 // Set the current chat
@@ -413,16 +434,14 @@ function loadChat(chatId) {
   chatContainer.innerHTML = '';
   
   // Load messages into chat container
-  chatHistory = chat.messages.map(msg => ({
-    user: msg.content,
-    assistant: msg.response
-  }));
+  chatHistory = chat.messages;
   
   // Display messages
   chat.messages.forEach(msg => {
-    addMessageToChat(msg.content, 'user');
-    if (msg.response) {
-      addMessageToChat(msg.response, 'assistant');
+    if (msg.role === 'user') {
+      addMessageToChat(msg.content, 'user');
+    } else if (msg.role === 'assistant') {
+      addMessageToChat(msg.content, 'assistant');
     }
   });
   
@@ -434,17 +453,19 @@ function loadChat(chatId) {
 function saveCurrentChat() {
   if (currentChatIndex === -1 || !currentChat.id) return;
   
-  allChats[currentChatIndex].messages = chatHistory.map(msg => ({
-    content: msg.user,
-    response: msg.assistant
-  }));
-  
+  // Extract messages from UI
+  allChats[currentChatIndex].messages = extractChatHistoryFromUI();
   allChats[currentChatIndex].updatedAt = new Date().toISOString();
   
-  // Update title to first message if available
-  if (chatHistory.length > 0 && chatHistory[0].user) {
-    const title = chatHistory[0].user.substring(0, 30) + (chatHistory[0].user.length > 30 ? '...' : '');
-    allChats[currentChatIndex].title = title;
+  // Update title to first user message if available
+  const firstUserMessage = allChats[currentChatIndex].messages.find(msg => msg.role === 'user');
+  if (firstUserMessage) {
+    const firstMessage = firstUserMessage.content;
+    // Skip if it's a test message or just a number
+    if (firstMessage.toLowerCase() !== 'test' && !/^\d+$/.test(firstMessage)) {
+      const title = firstMessage.substring(0, 30) + (firstMessage.length > 30 ? '...' : '');
+      allChats[currentChatIndex].title = title;
+    }
   }
   
   saveAllChats();
@@ -659,6 +680,7 @@ async function sendMessage() {
     // Create a placeholder for the assistant's response
     const assistantMessageId = addMessageToChat('', 'assistant');
     let responseText = '';
+    let hasRemovedPrefix = false;
     
     // Get the current chat history in the correct format
     const history = currentChat ? currentChat.messages : [];
@@ -669,11 +691,23 @@ async function sendMessage() {
       if (assistantMessage) {
         if (data.isComplete) {
           // For complete messages, render the final markdown
-          assistantMessage.querySelector('.message-content').innerHTML = processMarkdown(data.token);
-          responseText = data.token;
+          let cleanResponse = data.token;
+          // Remove "model\n" prefix if it exists
+          if (!hasRemovedPrefix && cleanResponse.toLowerCase().includes('model\n')) {
+            cleanResponse = cleanResponse.replace(/^.*?model\n/i, '');
+            hasRemovedPrefix = true;
+          }
+          assistantMessage.querySelector('.message-content').innerHTML = processMarkdown(cleanResponse);
+          responseText = cleanResponse;
         } else {
           // For streaming tokens, append to the text and convert to markdown
-          responseText += data.token;
+          let token = data.token;
+          // Only remove "model\n" prefix from the first token that contains it
+          if (!hasRemovedPrefix && token.toLowerCase().includes('model\n')) {
+            token = token.replace(/^.*?model\n/i, '');
+            hasRemovedPrefix = true;
+          }
+          responseText += token;
           assistantMessage.querySelector('.message-content').innerHTML = processMarkdown(responseText);
         }
       }
@@ -682,10 +716,10 @@ async function sendMessage() {
       if (data.isComplete) {
         removeStreamingListener();
         
-        // Clean the response by removing any "model" prefix before storing in history
+        // Clean the response by removing any "model\n" prefix before storing in history
         let cleanResponse = data.token;
-        if (cleanResponse.startsWith('model')) {
-          cleanResponse = cleanResponse.replace(/^model\s*\n*/, '');
+        if (!hasRemovedPrefix && cleanResponse.toLowerCase().includes('model\n')) {
+          cleanResponse = cleanResponse.replace(/^.*?model\n/i, '');
         }
         
         // Update chat history in the correct format
@@ -705,6 +739,9 @@ async function sendMessage() {
           { role: 'user', content: message },
           { role: 'assistant', content: cleanResponse }
         );
+        
+        // Update chatHistory to match the new format
+        chatHistory = currentChat.messages;
         
         // Save current chat
         saveCurrentChat();
