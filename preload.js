@@ -32,5 +32,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => {
       ipcRenderer.removeAllListeners('streaming-token');
     };
-  }
+  },
+
+  openExternal: (url) => ipcRenderer.invoke('open-external', url),
 }); 

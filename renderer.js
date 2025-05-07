@@ -763,27 +763,12 @@ async function sendMessage() {
 
 // Download model
 async function downloadModel() {
-  downloadButton.disabled = true;
-  localModelButton.disabled = true;
-  progressContainer.classList.remove('hidden');
-  downloadStatus.textContent = 'Starting download...';
-  
   try {
-    const result = await window.electronAPI.downloadModel();
-    
-    if (result.success) {
-      downloadStatus.textContent = 'Download complete. Initializing model...';
-      await window.electronAPI.initModel();
-    } else {
-      downloadButton.disabled = false;
-      localModelButton.disabled = false;
-      downloadStatus.textContent = `Download failed: ${result.error}`;
-    }
+    const modelUrl = 'https://creativetechnologies.s3.eu-west-2.amazonaws.com/LLM/google/gguf/gemma-3-1b-it-Q2_K.gguf';
+    await window.electronAPI.openExternal(modelUrl);
   } catch (error) {
-    console.error('Error downloading model:', error);
-    downloadButton.disabled = false;
-    localModelButton.disabled = false;
-    downloadStatus.textContent = `Download failed: ${error.message}`;
+    console.error('Error opening download URL:', error);
+    alert('Error opening download URL. Please try again.');
   }
 }
 

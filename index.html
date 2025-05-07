@@ -718,7 +718,7 @@
         </div>
         
         <!-- Settings button below chat history -->
-        <div class="sidebar-footer">
+        <div class="sidebar-footer hidden">
           <button id="settings-button" class="sidebar-settings-button">
             <span class="settings-icon">⚙️</span>
             <span class="settings-text">Settings</span>
@@ -739,10 +739,10 @@
         
         <div id="download-section" class="download-section hidden">
           <h2>Choose AI Model</h2>
-          <p>To start chatting, you need to either download the default AI model (about 1GB) or select a local GGUF model file.</p>
+          <p>First download model and then load it from Harddrive.</p>
           <div class="button-group">
-            <button id="download-button" class="download-button">Download Default Model</button>
-            <button id="local-model-button" class="local-model-button">Select Local Model</button>
+            <button id="download-button" class="download-button">Open Download Link</button>
+            <button id="local-model-button" class="local-model-button">Load Model from Harddrive</button>
           </div>
           <div class="progress-container hidden" id="progress-container">
             <div class="progress-bar" id="progress-bar"></div>
