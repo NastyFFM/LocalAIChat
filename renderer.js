@@ -692,20 +692,30 @@ async function sendMessage() {
         if (data.isComplete) {
           // For complete messages, render the final markdown
           let cleanResponse = data.token;
-          // Remove "model\n" prefix if it exists
-          if (!hasRemovedPrefix && cleanResponse.toLowerCase().includes('model\n')) {
-            cleanResponse = cleanResponse.replace(/^.*?model\n/i, '');
-            hasRemovedPrefix = true;
+          // Remove "model\n" or "assistant\n" prefix if it exists
+          if (!hasRemovedPrefix) {
+            if (cleanResponse.toLowerCase().includes('model\n')) {
+              cleanResponse = cleanResponse.replace(/^.*?model\n/i, '');
+              hasRemovedPrefix = true;
+            } else if (cleanResponse.toLowerCase().includes('assistant\n')) {
+              cleanResponse = cleanResponse.replace(/^.*?assistant\n/i, '');
+              hasRemovedPrefix = true;
+            }
           }
           assistantMessage.querySelector('.message-content').innerHTML = processMarkdown(cleanResponse);
           responseText = cleanResponse;
         } else {
           // For streaming tokens, append to the text and convert to markdown
           let token = data.token;
-          // Only remove "model\n" prefix from the first token that contains it
-          if (!hasRemovedPrefix && token.toLowerCase().includes('model\n')) {
-            token = token.replace(/^.*?model\n/i, '');
-            hasRemovedPrefix = true;
+          // Only remove prefix from the first token that contains it
+          if (!hasRemovedPrefix) {
+            if (token.toLowerCase().includes('model\n')) {
+              token = token.replace(/^.*?model\n/i, '');
+              hasRemovedPrefix = true;
+            } else if (token.toLowerCase().includes('assistant\n')) {
+              token = token.replace(/^.*?assistant\n/i, '');
+              hasRemovedPrefix = true;
+            }
           }
           responseText += token;
           assistantMessage.querySelector('.message-content').innerHTML = processMarkdown(responseText);
@@ -716,10 +726,14 @@ async function sendMessage() {
       if (data.isComplete) {
         removeStreamingListener();
         
-        // Clean the response by removing any "model\n" prefix before storing in history
+        // Clean the response by removing any prefix before storing in history
         let cleanResponse = data.token;
-        if (!hasRemovedPrefix && cleanResponse.toLowerCase().includes('model\n')) {
-          cleanResponse = cleanResponse.replace(/^.*?model\n/i, '');
+        if (!hasRemovedPrefix) {
+          if (cleanResponse.toLowerCase().includes('model\n')) {
+            cleanResponse = cleanResponse.replace(/^.*?model\n/i, '');
+          } else if (cleanResponse.toLowerCase().includes('assistant\n')) {
+            cleanResponse = cleanResponse.replace(/^.*?assistant\n/i, '');
+          }
         }
         
         // Update chat history in the correct format
