@@ -242,7 +242,9 @@ function updateModelStatus(status, message) {
 
 // Initialize the model
 async function initializeModel(customModelPath = null) {
-    console.log("==================== MODEL INITIALIZATION STARTED ====================");
+    console.log('=== Debug: initializeModel started ===');
+    console.log('Custom model path:', customModelPath);
+    
     try {
         if (model) {
             console.log("Model already loaded, checking if we need to reload");
@@ -374,7 +376,7 @@ async function initializeModel(customModelPath = null) {
             }
         }
     } catch (error) {
-        console.error('Error initializing model:', error);
+        console.error('Error in initializeModel:', error);
         console.error('Error stack:', error.stack);
         
         // Check for specific error types
@@ -407,60 +409,65 @@ async function ensureModelExists() {
 
 // Process chat message
 async function processChatMessage(event, { message, chatHistory, parameters, systemPrompt, templateId }) {
-  try {
-    if (!model) {
-      throw new Error('Model not initialized');
-    }
-
-    // Set model parameters
-    const modelParams = {
-      temperature: parameters?.temperature || 0.7,
-      top_p: parameters?.top_p || 0.9,
-      top_k: parameters?.top_k || 40,
-      repeat_penalty: parameters?.repeat_penalty || 1.1,
-      min_p: parameters?.min_p || 0.05,
-      max_length: parameters?.max_length || 2048,
-      stop_sequence: parameters?.stop_sequence || ['</s>', '<|im_end|>', '<|endoftext|>']
-    };
-
-    // Construct prompt from chat history and current message
-    //let prompt = systemPrompt ? `${systemPrompt}\n\n` : '';
+    console.log('=== Debug: processChatMessage started ===');
+    console.log('Message:', message);
+    console.log('Model status:', model ? 'initialized' : 'not initialized');
     
+    try {
+        if (!model) {
+            console.error('Model not initialized');
+            throw new Error('Model not initialized');
+        }
 
-    const systemPromptTemp = "<start_of_turn>user\nFrom this point on, you will behave strictly according to the role I am about to define for you:  \nYou are an intelligent, friendly, clever, and helpful assistant. Your core purpose is to support the user in any way possible — whether by explaining concepts, solving problems, offering ideas, providing technical assistance, or simply engaging in thoughtful conversation.  \nYou have deep and broad knowledge across many fields, you think critically, ask smart follow-up questions, and communicate clearly. You break down complex ideas into simple explanations and offer structured, relevant, and well-considered responses. When appropriate, you provide options, clarifications, or additional context.  \nYou maintain a warm, respectful, and positive tone at all times. You are never condescending or dismissive. Instead, you are supportive, thoughtful, and professional — aiming to make every interaction useful and pleasant.  \nOnce I finish describing your role (with this message), please confirm that you understand and are ready to act in this role. Then wait for my next input and respond accordingly — always as the intelligent, friendly, clever, and helpful assistant you are.  \nPlease begin now by confirming your understanding.<end_of_turn>\n<start_of_turn>model\nThank you for the clear and thoughtful description of my role.  \nI fully understand: from now on, I will act as an intelligent, friendly, clever, and helpful assistant. My focus is to support you in the best way possible — whether through clear explanations, creative thinking, technical guidance, or just meaningful conversation.  \nI’ll be attentive, thoughtful, and professional in every interaction, and I’m ready to adapt to your needs.  \nGo ahead with your first request whenever you're ready — I’m here and ready to help!<end_of_turn>";
-    let prompt = systemPromptTemp;
+        // Set model parameters
+        const modelParams = {
+            temperature: parameters?.temperature || 0.7,
+            top_p: parameters?.top_p || 0.9,
+            top_k: parameters?.top_k || 40,
+            repeat_penalty: parameters?.repeat_penalty || 1.1,
+            min_p: parameters?.min_p || 0.05,
+            max_length: parameters?.max_length || 2048,
+            stop_sequence: parameters?.stop_sequence || ['</s>', '<|im_end|>', '<|endoftext|>']
+        };
 
+        console.log('Model parameters:', modelParams);
 
-    // Add chat history
-    chatHistory.forEach(msg => {
-      if (msg.role === 'user') {
-        prompt += `<start_of_turn>user\n${msg.content}<end_of_turn>\n`;
-      } else if (msg.role === 'assistant') {
-        prompt += `<start_of_turn>model\n${msg.content}<end_of_turn>\n`;
-      }
-    });
+        // Construct prompt from chat history and current message
+        let prompt = systemPrompt ? `${systemPrompt}\n\n` : '';
+        
+        // Add chat history
+        chatHistory.forEach(msg => {
+            if (msg.role === 'user') {
+                prompt += `<start_of_turn>user ${msg.content}<end_of_turn>\n`;
+            } else if (msg.role === 'assistant') {
+                prompt += `<start_of_turn>assistant ${msg.content}<end_of_turn>\n`;
+            }
+        });
 
-    // Add current message
-    prompt += `<start_of_turn>user ${message}<end_of_turn>\n`;
+        // Add current message
+        prompt += `<start_of_turn>user ${message}<end_of_turn>\n`;
+        prompt += `<start_of_turn>assistant`;
 
-    console.log('Sending prompt to model:', prompt);
+        console.log('Sending prompt to model:', prompt);
 
-    // Generate response
-    const response = await model.generate(prompt, modelParams);
+        // Generate response
+        const response = await model.generate(prompt, modelParams);
 
-    // Send response back to renderer
-    mainWindow.webContents.send('streaming-token', {
-      token: response,
-      isComplete: true
-    });
+        console.log('Model response received:', response);
 
-  } catch (error) {
-    console.error('Error processing chat message:', error);
-    mainWindow.webContents.send('streaming-token', {
-      token: `Error: ${error.message}`,
-      isComplete: true
-    });
-  }
+        // Send response back to renderer
+        mainWindow.webContents.send('streaming-token', {
+            token: response,
+            isComplete: true
+        });
+
+    } catch (error) {
+        console.error('Error in processChatMessage:', error);
+        mainWindow.webContents.send('streaming-token', {
+            token: `Error: ${error.message}`,
+            isComplete: true
+        });
+    }
 }
 
 // Process raw chat string
