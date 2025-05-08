@@ -192,9 +192,8 @@ function processMarkdown(text) {
   
   // Remove any prefixes first
   const prefixes = [
-    'model\n',
-    'assistant\n',
-    '<start_of_turn>'
+    '<start_of_turn>model\n',
+    '<start_of_turn>assistant\n'
   ];
   
   let cleanText = text;
@@ -719,8 +718,18 @@ async function sendMessage() {
           // Store the completely raw response without any processing
           const rawResponse = data.token;
           
-          // Display the raw response in the UI
-          assistantMessage.querySelector('.message-content').textContent = rawResponse;
+          // Apply the same prefix trimming logic for complete response
+          let displayText = rawResponse;
+          const modelPrefix = '<start_of_turn>model\n';
+          const assistantPrefix = '<start_of_turn>assistant\n';
+          
+          if (displayText.includes(modelPrefix)) {
+            displayText = displayText.split(modelPrefix)[1];
+          } else if (displayText.includes(assistantPrefix)) {
+            displayText = displayText.split(assistantPrefix)[1];
+          }
+          
+          assistantMessage.querySelector('.message-content').textContent = displayText;
           
           // Update chat history
           if (!currentChat) {
@@ -759,7 +768,19 @@ async function sendMessage() {
         } else {
           // For streaming tokens, just append and show
           responseText += data.token;
-          assistantMessage.querySelector('.message-content').textContent = responseText;
+          
+          // Check for prefix and trim accordingly during streaming
+          let displayText = responseText;
+          const modelPrefix = '<start_of_turn>model\n';
+          const assistantPrefix = '<start_of_turn>assistant\n';
+          
+          if (displayText.includes(modelPrefix)) {
+            displayText = displayText.split(modelPrefix)[1];
+          } else if (displayText.includes(assistantPrefix)) {
+            displayText = displayText.split(assistantPrefix)[1];
+          }
+          
+          assistantMessage.querySelector('.message-content').textContent = displayText;
         }
       });
       
