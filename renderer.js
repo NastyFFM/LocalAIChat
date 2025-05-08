@@ -1172,6 +1172,21 @@ document.addEventListener('DOMContentLoaded', function() {
   loadSavedParameters();
   
   // Initialize the chat interface and search functionality
-  showChatInterface();
+  loadAllChats(); // Load chats first
+  showChatInterface(); // Then show the interface
   initializeSearch();
+  
+  // Set up chat management event listeners
+  setupChatManagementEventListeners();
+  
+  // Add event listener for new chat button
+  if (newChatButton) {
+    newChatButton.addEventListener('click', createNewChat);
+  }
+});
+
+// Add window unload event listener to save chat history
+window.addEventListener('beforeunload', function() {
+  saveCurrentChat();
+  saveAllChats();
 }); 
