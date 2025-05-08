@@ -181,14 +181,50 @@ marked.setOptions({
   sanitize: false,       // We'll use DOMPurify for sanitization
   smartLists: true,      // Use smarter list behavior
   smartypants: true,     // Use "smart" typographic punctuation
-  xhtml: false           // Don't close empty tags with a slash
+  xhtml: false,          // Don't close empty tags with a slash
+  pedantic: false,       // Don't be too strict about markdown rules
+  renderer: new marked.Renderer() // Use a custom renderer
 });
 
 // Process markdown and sanitize the result
 function processMarkdown(text) {
   if (!text) return '';
-  const rawHtml = marked.parse(text);
-  return DOMPurify.sanitize(rawHtml);
+  
+  // Remove any prefixes first
+  const prefixes = [
+    'model\n',
+    'assistant\n',
+    '<start_of_turn>'
+  ];
+  
+  let cleanText = text;
+  let foundPrefix = true;
+  while (foundPrefix) {
+    foundPrefix = false;
+    for (const prefix of prefixes) {
+      if (cleanText.toLowerCase().includes(prefix)) {
+        cleanText = cleanText.replace(new RegExp(`^.*?${prefix}`, 'i'), '');
+        foundPrefix = true;
+        break;
+      }
+    }
+  }
+  
+  // Process the markdown
+  const rawHtml = marked.parse(cleanText);
+  return DOMPurify.sanitize(rawHtml, {
+    ALLOWED_TAGS: [
+      'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+      'p', 'br', 'hr',
+      'strong', 'em', 'del',
+      'ul', 'ol', 'li',
+      'code', 'pre',
+      'blockquote',
+      'a', 'img',
+      'table', 'thead', 'tbody', 'tr', 'th', 'td'
+    ],
+    ALLOWED_ATTR: ['href', 'src', 'alt', 'title']
+  });
 }
 
 // Setup event listeners for UI elements
@@ -632,16 +668,8 @@ function addMessageToChat(message, sender) {
   const messageContent = document.createElement('div');
   messageContent.className = 'message-content';
   
-  // Handle message content differently based on sender
-  if (sender === 'user') {
-    // For user messages, just use text
-    messageContent.textContent = message;
-  } else {
-    // For assistant messages, enable markdown with sanitization
-    messageContent.innerHTML = processMarkdown(message);
-    // Add markdown-content class for styling
-    messageContent.classList.add('markdown-content');
-  }
+  // For both user and assistant messages, just use text
+  messageContent.textContent = message;
   
   messageDiv.appendChild(messageContent);
   chatContainer.appendChild(messageDiv);
@@ -681,78 +709,73 @@ async function sendMessage() {
     const history = currentChat ? currentChat.messages : [];
     
     // Set up streaming listener
-    const removeStreamingListener = window.electronAPI.onStreamingToken((data) => {
-      const assistantMessage = document.getElementById(assistantMessageId);
-      if (assistantMessage) {
+    let streamingListener = null;
+    try {
+      streamingListener = window.electronAPI.onStreamingToken((data) => {
+        const assistantMessage = document.getElementById(assistantMessageId);
+        if (!assistantMessage) return;
+
         if (data.isComplete) {
-          // For complete messages, render the final markdown
-          let cleanResponse = data.token;
-          // Remove any prefixes if they exist
-          const prefixes = [
-            'model\n',
-            'assistant\n',
-            '<start_of_turn>model\n',
-            '<start_of_turn>assistant\n'
-          ];
+          // Store the completely raw response without any processing
+          const rawResponse = data.token;
           
-          // Keep removing prefixes until none are found
-          let foundPrefix = true;
-          while (foundPrefix) {
-            foundPrefix = false;
-            for (const prefix of prefixes) {
-              if (cleanResponse.toLowerCase().includes(prefix)) {
-                cleanResponse = cleanResponse.replace(new RegExp(`^.*?${prefix}`, 'i'), '');
-                foundPrefix = true;
-                break;
-              }
-            }
+          // Display the raw response in the UI
+          assistantMessage.querySelector('.message-content').textContent = rawResponse;
+          
+          // Update chat history
+          if (!currentChat) {
+            currentChat = {
+              id: Date.now().toString(),
+              title: `Chat ${allChats.length + 1}`,
+              messages: [],
+              createdAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString()
+            };
+            allChats.unshift(currentChat);
           }
           
-          assistantMessage.querySelector('.message-content').innerHTML = processMarkdown(cleanResponse);
-          responseText = cleanResponse;
+          // Add messages to history with completely raw response
+          currentChat.messages.push(
+            { role: 'user', content: message },
+            { role: 'assistant', content: rawResponse }
+          );
+          
+          // Update chatHistory
+          chatHistory = currentChat.messages;
+          
+          // Save current chat
+          saveCurrentChat();
+          
+          // Clean up
+          if (streamingListener) {
+            streamingListener();
+            streamingListener = null;
+          }
+          
+          // Re-enable input
+          messageInput.disabled = false;
+          sendButton.disabled = false;
+          messageInput.focus();
         } else {
           // For streaming tokens, just append and show
           responseText += data.token;
-          assistantMessage.querySelector('.message-content').innerHTML = processMarkdown(responseText);
+          assistantMessage.querySelector('.message-content').textContent = responseText;
         }
-      }
+      });
       
-      // If the response is complete, update chat history
-      if (data.isComplete) {
-        removeStreamingListener();
-        
-        // Update chat history in the correct format
-        if (!currentChat) {
-          currentChat = {
-            id: Date.now().toString(),
-            title: `Chat ${allChats.length + 1}`,
-            messages: [],
-            createdAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString()
-          };
-          allChats.unshift(currentChat);
-        }
-        
-        // Add messages to history in the correct format
-        currentChat.messages.push(
-          { role: 'user', content: message },
-          { role: 'assistant', content: responseText }
-        );
-        
-        // Update chatHistory to match the new format
-        chatHistory = currentChat.messages;
-        
-        // Save current chat
-        saveCurrentChat();
-        
-        messageInput.disabled = false;
-        sendButton.disabled = false;
-        messageInput.focus();
+      // Send message to main process with correct history format
+      await window.electronAPI.sendMessage(message, history, modelParams);
+    } catch (error) {
+      console.error('Error in message handling:', error);
+      // Clean up on error
+      if (streamingListener) {
+        streamingListener();
+        streamingListener = null;
       }
-    });
-    
-    // Send message to main process with correct history format
-    await window.electronAPI.sendMessage(message, history, modelParams);
+      messageInput.disabled = false;
+      sendButton.disabled = false;
+      messageInput.focus();
+    }
   } catch (error) {
     console.error('Error sending message:', error);
     messageInput.disabled = false;
