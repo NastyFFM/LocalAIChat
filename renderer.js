@@ -47,6 +47,33 @@ const clearSearchButton = document.getElementById('clear-search');
 // Template management
 let templates = [];
 
+// Chat history
+let chatHistory = [];
+
+// Chat history management
+let allChats = [];
+let currentChat = null;
+let currentChatIndex = -1;
+
+/**
+ * @typedef {Object} ChatMessage
+ * @property {'user'|'assistant'} role - The role of the message sender
+ * @property {string} content - The raw message content
+ * @property {string} [formattedContent] - The formatted message content with markdown
+ */
+
+/**
+ * @typedef {Object} ChatHistory
+ * @property {string} id - Unique identifier for the chat
+ * @property {string} title - Chat title
+ * @property {ChatMessage[]} messages - Array of chat messages
+ * @property {string} createdAt - ISO timestamp of creation
+ * @property {string} updatedAt - ISO timestamp of last update
+ */
+
+// Add new formatted history structure
+let formattedChatHistory = new Map(); // Maps chatId to formatted messages
+
 // Validate DOM elements
 function validateDOMElements() {
   // Check that all required elements exist
@@ -325,14 +352,6 @@ function setupEventListeners() {
 // Call setup function
 setupEventListeners();
 
-// Chat history
-let chatHistory = [];
-
-// Chat history management
-let allChats = [];
-let currentChat = null;
-let currentChatIndex = -1;
-
 // Load all chats from localStorage
 function loadAllChats() {
   try {
@@ -468,15 +487,12 @@ function loadChat(chatId) {
   // Clear chat container
   chatContainer.innerHTML = '';
   
-  // Load messages into chat container
-  chatHistory = chat.messages;
-  
-  // Display messages
+  // Display messages using chat history
   chat.messages.forEach(msg => {
-    if (msg.role === 'user') {
-      addMessageToChat(msg.content, 'user');
-    } else if (msg.role === 'assistant') {
-      addMessageToChat(msg.content, 'assistant');
+    const messageId = addMessageToChat('', msg.role);
+    const messageElement = document.getElementById(messageId);
+    if (messageElement) {
+      messageElement.querySelector('.message-content').innerHTML = msg.formattedContent || msg.content;
     }
   });
   
@@ -489,11 +505,28 @@ function saveCurrentChat() {
   if (currentChatIndex === -1 || !currentChat.id) return;
   
   // Extract messages from UI
-  allChats[currentChatIndex].messages = extractChatHistoryFromUI();
+  const messages = [];
+  const messageElements = chatContainer.querySelectorAll('.message');
+  
+  messageElements.forEach(element => {
+    const isUser = element.classList.contains('user-message');
+    const messageContent = element.querySelector('.message-content');
+    const content = messageContent.textContent;
+    const formattedContent = messageContent.innerHTML;
+    
+    messages.push({
+      role: isUser ? 'user' : 'assistant',
+      content: content,
+      formattedContent: formattedContent // Always save the formatted content
+    });
+  });
+  
+  // Update chat history
+  allChats[currentChatIndex].messages = messages;
   allChats[currentChatIndex].updatedAt = new Date().toISOString();
   
   // Update title to first user message if available
-  const firstUserMessage = allChats[currentChatIndex].messages.find(msg => msg.role === 'user');
+  const firstUserMessage = messages.find(msg => msg.role === 'user');
   if (firstUserMessage) {
     const firstMessage = firstUserMessage.content;
     // Skip if it's a test message or just a number
@@ -705,7 +738,10 @@ async function sendMessage() {
     let responseText = '';
     
     // Get the current chat history in the correct format
-    const history = currentChat ? currentChat.messages : [];
+    const history = currentChat ? currentChat.messages.map(msg => ({
+      role: msg.role,
+      content: msg.content
+    })) : [];
     
     // Set up streaming listener
     let streamingListener = null;
@@ -729,7 +765,9 @@ async function sendMessage() {
             displayText = displayText.split(assistantPrefix)[1];
           }
           
-          assistantMessage.querySelector('.message-content').textContent = displayText;
+          // Process markdown for display
+          const formattedContent = processMarkdown(displayText);
+          assistantMessage.querySelector('.message-content').innerHTML = formattedContent;
           
           // Update chat history
           if (!currentChat) {
@@ -743,14 +781,11 @@ async function sendMessage() {
             allChats.unshift(currentChat);
           }
           
-          // Add messages to history with completely raw response
+          // Add messages to history
           currentChat.messages.push(
-            { role: 'user', content: message },
-            { role: 'assistant', content: rawResponse }
+            { role: 'user', content: message, formattedContent: message },
+            { role: 'assistant', content: rawResponse, formattedContent: formattedContent }
           );
-          
-          // Update chatHistory
-          chatHistory = currentChat.messages;
           
           // Save current chat
           saveCurrentChat();
@@ -780,7 +815,8 @@ async function sendMessage() {
             displayText = displayText.split(assistantPrefix)[1];
           }
           
-          assistantMessage.querySelector('.message-content').textContent = displayText;
+          // Process markdown for display
+          assistantMessage.querySelector('.message-content').innerHTML = processMarkdown(displayText);
         }
       });
       
